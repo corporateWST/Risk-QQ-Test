@@ -92,6 +92,28 @@ input:focus-visible,select:focus-visible,textarea:focus-visible,button:focus-vis
 .field.bad input,.field.bad select{border-color:var(--bad)}
 .err{color:var(--bad);font-weight:600;font-size:14px;margin:6px 0 0}
 
+/* investing history choices and the years slider */
+fieldset.group{margin:0 0 22px}
+.group .hint{display:block;font-size:14px;color:var(--muted);margin:0 0 10px}
+legend.flabel{font:600 15px/1.3 var(--sans);letter-spacing:0;margin:0 0 3px;color:var(--text)}
+.hz-out{font-family:var(--serif);font-size:34px;line-height:1.1;font-weight:600;margin:6px 0 4px}
+.hz-out.unset{color:var(--muted);font-size:22px;font-weight:400}
+.hz-row{display:flex;align-items:center;gap:10px}
+.hz-row .step{flex:none;width:48px;height:48px;padding:0;border-radius:50%;border:1.5px solid var(--line);background:var(--foam);color:var(--text);font-size:26px;line-height:1;display:grid;place-content:center}
+.hz-track{flex:1;min-width:0}
+input[type=range]{-webkit-appearance:none;appearance:none;display:block;width:100%;height:8px;min-height:0;margin:20px 0 8px;padding:0;border:0;border-radius:4px;background:linear-gradient(to right,var(--tide) var(--pct,50%),var(--line) var(--pct,50%))}
+input[type=range]::-webkit-slider-runnable-track{height:8px;background:transparent}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:30px;height:30px;margin-top:-11px;border-radius:50%;background:var(--buoy);border:3px solid var(--ink)}
+input[type=range]::-moz-range-track{height:8px;background:transparent}
+input[type=range]::-moz-range-thumb{width:24px;height:24px;border-radius:50%;background:var(--buoy);border:3px solid var(--ink)}
+.hz.unset input[type=range]{background:var(--line)}
+.hz.unset input[type=range]::-webkit-slider-thumb{background:var(--foam);border-color:var(--muted)}
+.hz.unset input[type=range]::-moz-range-thumb{background:var(--foam);border-color:var(--muted)}
+@media (prefers-color-scheme: dark){ input[type=range]::-webkit-slider-thumb{border-color:var(--foam)} input[type=range]::-moz-range-thumb{border-color:var(--foam)} }
+.hz-ticks{position:relative;height:22px;margin:0 15px;font-size:13px;color:var(--muted)}
+.hz-ticks span{position:absolute;top:0;transform:translateX(-50%)}
+.hz.bad .hz-out{color:var(--bad)}
+
 /* buttons */
 button{font:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent}
 .btn{min-height:54px;padding:0 24px;border-radius:999px;border:1.5px solid var(--btn-bg);background:var(--btn-bg);color:var(--btn-ink);font-weight:600}
@@ -357,6 +379,54 @@ function fieldFor(f, obj, prefix, bad){
   }
   return h('div',{class:'field'+(bad?' bad':'')},h('label',{for:id},f.label),f.hint?h('span',{class:'hint'},f.hint):null,control,bad?h('p',{class:'err'},'Required'):null);
 }
+const HISTORY_OPTIONS=['Stocks','Bonds','ETFs','Real Estate','Gold','Alternative Assets','Private Equity'], HISTORY_NONE='None of these';
+function historyField(){
+  const P=state.profile, boxes={};
+  const sel=new Set(String(P.history||'').split(', '));
+  const sync=changed=>{
+    if(changed===HISTORY_NONE && boxes[HISTORY_NONE].checked) HISTORY_OPTIONS.forEach(o=>{boxes[o].checked=false;});
+    else if(changed!==HISTORY_NONE) boxes[HISTORY_NONE].checked=false;
+    const picked=HISTORY_OPTIONS.filter(o=>boxes[o].checked);
+    if(boxes[HISTORY_NONE].checked) picked.push(HISTORY_NONE);
+    P.history=picked.join(', '); touch();
+  };
+  const row=label=>{ const i=h('input',{type:'checkbox',onchange:()=>sync(label)}); i.checked=sel.has(label); boxes[label]=i; return h('label',{class:'opt'},i,h('span',{},label)); };
+  return h('fieldset',{class:'group'},
+    h('legend',{class:'flabel'},'What have you invested in before?'),
+    h('span',{class:'hint'},'Tick all that apply.'),
+    HISTORY_OPTIONS.map(row), row(HISTORY_NONE));
+}
+const HORIZON_MAX=30;
+const horizonText=v=>v<=0?'Less than 1 year':v===1?'1 year':v>=HORIZON_MAX?HORIZON_MAX+' or more years':v+' years';
+function sliderField(bad){
+  const chosen0=capValid(state.cap.horizon);
+  const start=chosen0?Math.min(HORIZON_MAX,Math.max(0,Math.round(Number(state.cap.horizon)))):15;
+  const out=h('div',{class:'hz-out'+(chosen0?'':' unset'),'aria-hidden':'true'},chosen0?horizonText(start):'Slide to choose');
+  const rng=h('input',{id:'cap-horizon',type:'range',min:'0',max:String(HORIZON_MAX),step:'1','aria-label':'Years until a large withdrawal might be needed'});
+  rng.value=String(start);
+  rng.setAttribute('style','--pct:'+(start/HORIZON_MAX*100)+'%');
+  const box=h('div',{class:'field hz'+(chosen0?'':' unset')+(bad?' bad':'')});
+  const errEl=bad?h('p',{class:'err'},'Required'):null;
+  const apply=v=>{
+    v=Math.max(0,Math.min(HORIZON_MAX,Math.round(v)));
+    rng.value=String(v); state.cap.horizon=String(v);
+    out.textContent=horizonText(v); out.className='hz-out';
+    rng.setAttribute('aria-valuetext',horizonText(v));
+    rng.setAttribute('style','--pct:'+(v/HORIZON_MAX*100)+'%');
+    box.className='field hz'; if(errEl) errEl.hidden=true; touch();
+  };
+  const current=()=>capValid(state.cap.horizon)?Number(state.cap.horizon):15;
+  rng.addEventListener('input',e=>apply(Number(e.target.value)));
+  const minus=h('button',{type:'button',class:'step','aria-label':'One year less',onclick:()=>apply(capValid(state.cap.horizon)?current()-1:14)},'\u2212');
+  const plus=h('button',{type:'button',class:'step','aria-label':'One year more',onclick:()=>apply(capValid(state.cap.horizon)?current()+1:16)},'+');
+  const ticks=h('div',{class:'hz-ticks','aria-hidden':'true'},[0,5,10,15,20,25,30].map(n=>h('span',{style:'left:'+(n/HORIZON_MAX*100)+'%'},n===HORIZON_MAX?'30+':String(n))));
+  box.append(h('label',{for:'cap-horizon'},'Years until a large withdrawal might be needed'),
+    h('span',{class:'hint'},'Drag the slider, or use the minus and plus buttons. Choose 0 if you may need it within a year.'),
+    out,
+    h('div',{class:'hz-row'},minus,h('div',{class:'hz-track'},rng,ticks),plus));
+  if(errEl) box.append(errEl);
+  return box;
+}
 function screenFor(s){
   const wrap=h('div',{});
   const title=t=>{ const e=h('h2',{tabindex:'-1'},t); focusEl=e; return e; };
@@ -383,7 +453,7 @@ function screenFor(s){
   }
   else if(s.t==='profile'){
     wrap.append(title(s.title),h('p',{class:'lede'},'Optional. The more you share, the better your advisor can help.'));
-    s.keys.forEach(k=>wrap.append(fieldFor(PF.find(f=>f.k===k),state.profile,'pf-',false)));
+    s.keys.forEach(k=>wrap.append(k==='history'?historyField():fieldFor(PF.find(f=>f.k===k),state.profile,'pf-',false)));
   }
   else if(s.t==='ins'){
     wrap.append(title('Insurance you have'),h('p',{class:'lede'},'Optional. Tick all that apply.'));
@@ -400,7 +470,7 @@ function screenFor(s){
   }
   else if(s.t==='cap'){
     wrap.append(title(s.title),h('p',{class:'lede'},'Estimates are fine.'));
-    s.keys.forEach(k=>{ const f=CAP_FIELDS.find(x=>x.k===k); wrap.append(fieldFor(f,state.cap,'cap-',showErrors&&CAP_REQ.includes(k)&&!capValid(state.cap[k]))); });
+    s.keys.forEach(k=>{ const bad=showErrors&&CAP_REQ.includes(k)&&!capValid(state.cap[k]); const f=CAP_FIELDS.find(x=>x.k===k); wrap.append(k==='horizon'?sliderField(bad):fieldFor(f,state.cap,'cap-',bad)); });
   }
   else if(s.t==='hold'){
     wrap.append(title(s.title),
