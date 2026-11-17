@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1D5C7A">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="robots" content="noindex">
+<title>Investor questionnaire</title>
+<style>
+:root{
+  color-scheme: light dark;
+  --ink:#12304A; --mist:#EEF3F6; --foam:#FFFFFF; --tide:#1F7A8C; --buoy:#F4B63F;
+  --text:#12304A; --muted:#51697B; --line:#C9D6DE; --soft:#E1EAEF;
+  --pick-bg:#12304A; --pick-ink:#FFFFFF; --btn-bg:#12304A; --btn-ink:#FFFFFF;
+  --bad:#B3392F; --ok:#1F7A55;
+  --serif: Charter,"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
+  --sans: "Avenir Next","Segoe UI",system-ui,-apple-system,Roboto,sans-serif;
+}
+@media (prefers-color-scheme: dark){
+  :root{ --mist:#0C1B2A; --foam:#14283B; --text:#E8F0F5; --muted:#9DB2C2; --line:#2B4357; --soft:#1B3246;
+    --tide:#5BB6C8; --pick-bg:#1F7A8C; --pick-ink:#FFFFFF; --btn-bg:#1F7A8C; --btn-ink:#FFFFFF; --bad:#F0948B; --ok:#6CC59A; }
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--mist);color:var(--text);font:17px/1.5 var(--sans)}
+.app{max-width:560px;margin:0 auto;min-height:100vh;min-height:100dvh;display:flex;flex-direction:column}
+
+/* course line: the progress indicator */
+header.bar{position:sticky;top:0;z-index:5;background:var(--mist);padding:max(16px,env(safe-area-inset-top)) 20px 10px}
+.course{position:relative;height:22px;margin:0 11px}
+.course .line,.course .fill{position:absolute;left:0;top:10px;height:2px;border-radius:1px}
+.course .line{right:0;background:var(--line)}
+.course .fill{width:0;background:var(--tide);transition:width .35s ease}
+.course .wp{position:absolute;top:5px;width:12px;height:12px;margin-left:-6px;border-radius:50%;background:var(--mist);border:2px solid var(--line);transition:border-color .35s,background .35s}
+.course .wp.done{background:var(--tide);border-color:var(--tide)}
+.course .buoy{position:absolute;top:0;left:0;width:22px;height:22px;margin-left:-11px;border-radius:50%;background:var(--buoy);border:3px solid var(--ink);transition:left .35s ease}
+@media (prefers-color-scheme: dark){ .course .buoy{border-color:var(--foam)} }
+.meta{display:flex;justify-content:space-between;gap:12px;margin-top:8px;font-size:14px;color:var(--muted);min-height:21px}
+.meta #m-left{color:var(--text);font-weight:600}
+
+main{flex:1;padding:6px 20px 36px}
+h1,h2,legend{font-family:var(--serif);font-weight:600;color:var(--text);outline:none}
+h1{font-size:36px;line-height:1.08;letter-spacing:-.015em;margin:22px 0 14px}
+h2{font-size:28px;line-height:1.15;letter-spacing:-.01em;margin:16px 0 8px}
+legend{padding:0;font-size:27px;line-height:1.22;letter-spacing:-.01em;margin:16px 0 20px}
+.lede{color:var(--muted);margin:0 0 20px}
+.fine{font-size:14px;color:var(--muted);margin:14px 0}
+.note{border-left:4px solid var(--tide);padding:2px 0 2px 14px;margin:0 0 20px;color:var(--muted)}
+.note p{margin:0}
+fieldset{border:0;margin:0;padding:0;min-width:0}
+
+/* welcome: the route */
+.route{list-style:none;margin:26px 0 28px;padding:0 0 0 34px;position:relative}
+.route::before{content:"";position:absolute;left:10px;top:10px;bottom:22px;width:2px;background:var(--line)}
+.route li{position:relative;padding:0 0 20px}
+.route li:last-child{padding-bottom:0}
+.route li::before{content:"";position:absolute;left:-31px;top:4px;width:14px;height:14px;border-radius:50%;background:var(--mist);border:2px solid var(--tide)}
+.route li.here::before{left:-34px;top:1px;width:20px;height:20px;background:var(--buoy);border:3px solid var(--ink)}
+@media (prefers-color-scheme: dark){ .route li.here::before{border-color:var(--foam)} }
+.route b{display:block;font-family:var(--serif);font-size:19px;font-weight:600;line-height:1.25}
+.route span{display:block;color:var(--muted);font-size:15px}
+.resume{padding:16px 0;margin:0 0 6px;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.resume p{margin:0 0 14px}
+
+/* answers */
+.opt{display:flex;align-items:center;gap:14px;min-height:60px;padding:14px 16px;margin:0 0 10px;background:var(--foam);border:1.5px solid var(--line);border-radius:16px;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:background .15s,border-color .15s,color .15s}
+.opt:has(input:checked){background:var(--pick-bg);border-color:var(--pick-bg);color:var(--pick-ink)}
+.opt:has(input:focus-visible){outline:3px solid var(--tide);outline-offset:3px}
+.opt input{-webkit-appearance:none;appearance:none;flex:none;width:24px;height:24px;margin:0;display:grid;place-content:center;background:transparent;border:2px solid var(--muted);border-radius:50%}
+.opt input[type=checkbox]{border-radius:7px}
+.opt input[type=radio]:checked{border-color:var(--buoy)}
+.opt input[type=radio]:checked::before{content:"";width:12px;height:12px;border-radius:50%;background:var(--buoy)}
+.opt input[type=checkbox]:checked{background:var(--buoy);border-color:var(--buoy)}
+.opt input[type=checkbox]:checked::before{content:"";width:6px;height:12px;margin-top:-2px;border:solid var(--ink);border-width:0 3px 3px 0;transform:rotate(45deg)}
+
+/* fields */
+.field{margin:0 0 22px}
+.field label{display:block;font-size:15px;font-weight:600;margin-bottom:3px}
+.field .hint{display:block;font-size:14px;color:var(--muted);margin-bottom:8px}
+input[type=text],input[type=number],select,textarea{width:100%;min-height:54px;padding:13px 14px;font:inherit;font-size:18px;color:var(--text);background:var(--foam);border:1.5px solid var(--line);border-radius:12px}
+textarea{min-height:120px;resize:vertical}
+input[type=text]:focus,input[type=number]:focus,select:focus,textarea:focus{border-color:var(--tide)}
+input:focus-visible,select:focus-visible,textarea:focus-visible,button:focus-visible{outline:3px solid var(--tide);outline-offset:2px}
+.field.bad input,.field.bad select{border-color:var(--bad)}
+.err{color:var(--bad);font-weight:600;font-size:14px;margin:6px 0 0}
+
+/* buttons */
+button{font:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.btn{min-height:54px;padding:0 24px;border-radius:999px;border:1.5px solid var(--btn-bg);background:var(--btn-bg);color:var(--btn-ink);font-weight:600}
+.btn.ghost{background:transparent;color:var(--text);border-color:var(--line)}
+.btn[disabled]{opacity:.38;cursor:not-allowed}
+.btn.wide{width:100%;margin:0 0 12px}
+nav.foot{position:sticky;bottom:0;display:flex;gap:12px;padding:12px 20px max(14px,env(safe-area-inset-bottom));background:var(--mist);border-top:1px solid var(--line)}
+@supports (backdrop-filter:blur(8px)){ nav.foot{background:color-mix(in srgb,var(--mist) 90%,transparent);backdrop-filter:blur(10px)} }
+nav.foot #back{flex:0 0 32%}
+nav.foot #next{flex:1}
+nav.foot[hidden]{display:none}
+
+/* review and finish */
+ul.sum{list-style:none;margin:6px 0 22px;padding:0}
+ul.sum li{display:flex;justify-content:space-between;gap:16px;padding:13px 0;border-bottom:1px solid var(--line)}
+ul.sum li span{white-space:nowrap}
+ul.sum b{font-weight:600;text-align:right}
+ul.miss{list-style:none;margin:6px 0 22px;padding:0}
+ul.miss li{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--line)}
+ul.miss .btn{min-height:42px;padding:0 18px;flex:none}
+.ok{color:var(--ok);font-weight:600;margin:0 0 6px}
+.status{font-size:14px;color:var(--muted);margin:8px 0 14px;min-height:21px}
+.done-badge{width:68px;height:68px;margin:22px 0 4px;border-radius:50%;background:var(--tide);display:grid;place-content:center}
+.done-badge::after{content:"";width:16px;height:30px;margin-top:-5px;border:solid #fff;border-width:0 5px 5px 0;transform:rotate(45deg)}
+@media (prefers-reduced-motion:reduce){ .course .fill,.course .buoy,.course .wp,.opt{transition:none} }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="bar">
+    <div class="course" id="track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-label="Progress through the questionnaire">
+      <div class="line"></div><div class="fill" id="fill"></div><div class="buoy" id="buoy"></div>
+    </div>
+    <div class="meta"><span id="m-left"></span><span id="m-right"></span></div>
+  </header>
+  <main id="screen" tabindex="-1" aria-live="polite"></main>
+  <nav class="foot" id="foot">
+    <button type="button" class="btn ghost" id="back">Back</button>
+    <button type="button" class="btn" id="next">Next</button>
+  </nav>
+</div>
+
+<script>
+/* ===== DATA (copied from the advisor tool, so answers load into it unchanged) ===== */
+/* Original questionnaire, written for this tool. Not independently validated. */
+const QUESTIONNAIRE_VERSION = 'original-v2';
+const FIVE = ['A great deal','Quite a bit','Somewhat','Very little','Not at all'];
+const TOL_Q = [
+  {dim:'inv', q:'A fund you own falls 15% over two months, with no bad news about the fund itself. What are you most likely to do?',
+   opts:['Sell all of it and move to cash','Sell part of it','Keep it, but check it often and worry','Keep it and stick to my plan','Buy more while it is cheaper']},
+  {dim:'inv', q:'You have extra savings you will not need for at least ten years. Which mix of investments appeals to you most?',
+   opts:['All in savings accounts or CDs','Mostly bonds, with a little in stocks','About half in stocks and half in bonds','Mostly stocks, with some bonds','All in stocks, including smaller and overseas companies']},
+  {dim:'inv', q:'Suppose your investments fall below their previous high. How long could you wait for them to recover before you would want to change course?',
+   opts:['A few weeks','About three months','About a year','Two to three years','More than three years, or I would not change course']},
+  /* Loss-limit options are set from the model sheet: worst declines run 12-19% (tiers 1-2), 27-34% (3-4), 36-44% (5) and 63-81% (6). */
+  {dim:'inv', q:'What is the largest drop from its peak value, over any period, that your portfolio could suffer before you would change your plan?',
+   opts:['20% or less','Up to 35%','Up to 45%','Up to 65%','More than 65%'], limits:[20,35,45,65,65], openLabel:'more than 65%'},
+  {dim:'comfort', q:'In past market declines, what did you do?',
+   opts:['Sold most of my investments','Sold some of my investments','I have not invested through a decline','Held my investments','Bought more']},
+  {dim:'comfort', q:'How much do headlines about falling markets affect your mood or sleep?', opts:FIVE},
+  {dim:'comfort', q:'After you make a big financial decision, how do you usually feel?',
+   opts:['I second-guess it for a long time','I feel uneasy for a while','My feelings are mixed','I feel mostly confident','I feel comfortable and move on quickly']},
+  {dim:'exp', q:'How would you rate your own knowledge of stocks, bonds and funds?',
+   opts:['None','Basic','Fair','Good','Advanced']},
+  {dim:'comfort', q:'Someone you trust tells you about an investment idea that sounds promising. What do you usually do?',
+   opts:['Ignore it','Research it and nearly always pass','Research it and invest a small amount','Research it and invest a meaningful amount','Act quickly before the chance passes']},
+  {dim:'spec', q:'A new type of investment has no long track record, but it could double in value or lose half over three years. What share of your investments would you put in it?',
+   opts:['None','Up to 2%','Up to 5%','Up to 10%','More than 10%']},
+  {dim:'spec', q:'For the next year, which outcome would you pick? All three average a 4% gain.',
+   opts:['A sure gain of 4%','An even chance of gaining 8% or gaining nothing','An even chance of gaining 14% or losing 6%'], scores:[1,3,5]},
+  {dim:'spec', q:'Suppose you must accept one of these outcomes for next year. All three average a 6% loss.',
+   opts:['A sure loss of 6%','An even chance of losing 12% or losing nothing','An even chance of losing 20% or gaining 8%'], scores:[1,3,5]}
+];
+const tolScore = (qi, v) => { const q=TOL_Q[qi]; return q.scores ? q.scores[v-1] : v; };
+/* Pairs of questions that should point the same way. A gap of 3 or more points is flagged. */
+const TOL_PAIRS = [
+  [0,4,'their stated reaction to a 15% drop','what they did in past declines'],
+  [0,3,'their stated reaction to a 15% drop','the largest decline from peak they said they could accept'],
+  [1,3,'the investment mix they prefer','the largest decline from peak they said they could accept']
+];
+const tolWord = v => v<=2?'low':v===3?'moderate':'high';
+
+const CAP_FIELDS = [
+  {k:'horizon',   label:'Years until a large share is needed', hint:'Time until the client expects to start drawing down this money.', type:'number', step:'1'},
+  {k:'income',    label:'Income stability', type:'select', opts:[['5','Stable, covers all spending'],['4','Mostly stable, covers most spending'],['3','Variable, covers essentials'],['2','Unstable, covers little'],['1','None, relying on the portfolio']]},
+  {k:'emergency', label:'Emergency reserves, in months', hint:'Cash outside this portfolio, in months of spending.', type:'number', step:'0.5'},
+  {k:'withdrawal',label:'Planned withdrawals, % per year', hint:'Over the next five years. Enter 0 if none.', type:'number', step:'0.1'},
+  {k:'liquidity', label:'Large expenses within 5 years, % of portfolio', hint:'Home purchase, tuition, and similar. Enter 0 if none.', type:'number', step:'1'},
+  {k:'networth',  label:'Net worth excluding primary residence ($)', hint:'Optional. Used to size the portfolio against total wealth.', type:'number', step:'1000', optional:true},
+  {k:'debt',      label:'Debt burden', type:'select', opts:[['5','Low, easily manageable'],['3','Moderate'],['1','High, strains monthly cash flow']]},
+  {k:'dependents',label:'Financial dependents', type:'number', step:'1'}
+];
+const INSURANCE=['Life','Disability','Health','Long-term care','Umbrella liability'];
+const PF=[
+  {k:'age',label:'Age',type:'number',step:'1'},
+  {k:'marital',label:'Marital status',type:'select',opts:['Single','Married or partnered','Divorced','Widowed']},
+  {k:'employment',label:'Employment',type:'select',opts:['Employed','Self-employed','Retired','Not working','Other']},
+  {k:'income',label:'Annual household income ($)',type:'number',step:'1000',money:true},
+  {k:'debtTotal',label:'Total debt ($)',hint:'Mortgage, loans and cards. Optional.',type:'number',step:'1000',money:true},
+  {k:'tax',label:'Federal marginal tax bracket',type:'select',opts:['Up to 12%','22% to 24%','32% to 35%','37%','Not known']},
+  {k:'otherAssets',label:'Assets held elsewhere ($)',hint:'Outside this portfolio, excluding the home. Optional.',type:'number',step:'1000',money:true},
+  {k:'otherAssetsNote',label:'Where those assets are held',type:'text'},
+  {k:'historyYears',label:'Years investing',type:'number',step:'1'},
+  {k:'history',label:'Investment history notes',hint:'Products used and how the client acted in past declines.',type:'text'},
+  {k:'goals',label:'Financial goals',hint:'What the money is for, and when.',type:'textarea',wide:true},
+  {k:'restrictions',label:'Restrictions and special circumstances',hint:'Values-based limits, employer stock, health, other.',type:'textarea',wide:true}
+];
+const blankProfile = () => ({age:'',marital:'',employment:'',income:'',debtTotal:'',tax:'',otherAssets:'',otherAssetsNote:'',historyYears:'',history:'',goals:'',restrictions:'',insurance:[],noInsurance:false});
+
+/* ===== STATE, STEPS, RULES ===== */
+const isoDate = (dt=new Date()) => dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0');
+const freshState = () => ({
+  name:'', advisor:'', tol:Array(TOL_Q.length).fill(null),
+  cap:{horizon:'',income:'',emergency:'',withdrawal:'',liquidity:'',networth:'',debt:'',dependents:''},
+  profile:blankProfile(),
+  hold:Array(12).fill(''), maxPos:''
+});
+const state = freshState();
+const CAP_REQ=['horizon','income','emergency','withdrawal','liquidity','debt','dependents'];
+const capValid = v => v!=='' && v!=null && Number.isFinite(Number(v)) && Number(v)>=0;
+const PROFILE_GROUPS=[
+  {title:'You and your household', keys:['age','marital','employment','income']},
+  {title:'Debt and other assets', keys:['debtTotal','tax','otherAssets','otherAssetsNote']},
+  {title:'Your investing history', keys:['historyYears','history']},
+  {title:'Goals and special circumstances', keys:['goals','restrictions']}
+];
+const CAP_GROUPS=[['horizon','income','emergency'],['withdrawal','liquidity','networth'],['debt','dependents']];
+/* cls is the asset class number used by the advisor tool. tool is that class name there; a test checks the two match. */
+const HOLD_CLASSES=[
+  {cls:0, tool:'US large-cap equity',       label:'US large company stocks',               hint:'S&P 500 funds, total US stock funds, blue-chip stocks you own through funds'},
+  {cls:1, tool:'US small-cap equity',       label:'US small company stocks',               hint:'Small-company stock funds'},
+  {cls:2, tool:'International developed',   label:'Stocks outside the US',                 hint:'Developed countries, such as Europe and Japan'},
+  {cls:3, tool:'Emerging markets',          label:'Emerging market stocks',                hint:'Developing countries, such as China, India and Brazil'},
+  {cls:11,tool:'Individual stocks',         label:'Individual company stocks',             hint:'Shares of single companies you own directly'},
+  {cls:7, tool:'Real estate (REITs)',       label:'Real estate funds',                     hint:'REITs and real estate funds. Not your home.'},
+  {cls:4, tool:'US core bonds',             label:'Bonds',                                 hint:'Bond funds and individual bonds'},
+  {cls:5, tool:'Short-term bonds, T-bills', label:'Short-term bonds and Treasury bills',   hint:'Maturing in about a year or two'},
+  {cls:6, tool:'High-yield bonds',          label:'High-yield bonds',                      hint:'Also called junk bonds'},
+  {cls:9, tool:'Cash',                      label:'Cash, savings, CDs and money market',   hint:'Held in this investment account or kept for investing'},
+  {cls:8, tool:'Commodities, gold',         label:'Gold and commodities',                  hint:'Gold, silver, oil and similar funds'},
+  {cls:10,tool:'Alternatives',              label:'Alternatives',                          hint:'Hedge funds, private funds, managed futures'}
+];
+const HOLD_GROUPS=[
+  {title:'Stocks and real estate you own', part:'1 of 2', keys:[0,1,2,3,4,5]},
+  {title:'Bonds, cash and other', part:'2 of 2', keys:[6,7,8,9,10,11], maxPos:true}
+];
+const steps=[{t:'welcome'},{t:'you'}];
+PROFILE_GROUPS.forEach(g=>steps.push({t:'profile',title:g.title,keys:g.keys}));
+steps.push({t:'ins'});
+const CAP_TITLES=['Time, income and savings','Upcoming spending and net worth','Debt and dependents'];
+CAP_GROUPS.forEach((g,i)=>steps.push({t:'cap',title:CAP_TITLES[i],part:(i+1)+' of '+CAP_GROUPS.length,keys:g}));
+HOLD_GROUPS.forEach(g=>steps.push({t:'hold',title:g.title,part:g.part,keys:g.keys,maxPos:!!g.maxPos}));
+TOL_Q.forEach((q,i)=>steps.push({t:'q',i}));
+steps.push({t:'review'},{t:'finish'});
+const SECTION_OF={welcome:-1,you:0,profile:1,ins:1,cap:2,hold:3,q:4,review:5,finish:5};
+const SECTIONS=[
+  {name:'About you', desc:'Your name and your advisor.'},
+  {name:'Your situation', desc:'Household, work, goals and insurance. Optional.'},
+  {name:'Your finances', desc:'Time horizon, income and savings.'},
+  {name:'Your investments', desc:'What you hold today. Optional.'},
+  {name:'Risk questions', desc:TOL_Q.length+' short questions about how you feel about loss.'},
+  {name:'Review and send', desc:'Check your answers, then send them to your advisor.'}
+];
+SECTIONS.forEach((x,i)=>{ x.start=steps.findIndex(s=>SECTION_OF[s.t]===i); });
+const IDX={you:1, cap:steps.findIndex(s=>s.t==='cap'), q:steps.findIndex(s=>s.t==='q'), review:steps.findIndex(s=>s.t==='review')};
+
+function progress(st){
+  const tolDone=st.tol.filter(v=>v!=null).length;
+  const capDone=CAP_REQ.filter(k=>capValid(st.cap[k])).length;
+  const missing=[];
+  if(!st.name.trim()) missing.push({label:'Your name', go:IDX.you});
+  if(capDone<CAP_REQ.length) missing.push({label:(CAP_REQ.length-capDone)+' required '+(CAP_REQ.length-capDone===1?'field':'fields')+' in Your finances', go:IDX.cap});
+  if(tolDone<TOL_Q.length){ const first=st.tol.findIndex(v=>v==null); missing.push({label:(TOL_Q.length-tolDone)+' '+(TOL_Q.length-tolDone===1?'question':'questions')+' about risk', go:IDX.q+first}); }
+  const holdRows=HOLD_CLASSES.map((c,i)=>({cls:c.cls,amt:st.hold[i]})).filter(r=>Number(r.amt)>0);
+  return {tolDone,capDone,missing,complete:missing.length===0,holdCount:holdRows.length,holdTotal:holdRows.reduce((a,r)=>a+Number(r.amt),0)};
+}
+/* What is still missing on one screen. Returns a list of keys. */
+function stepMissing(s){
+  if(s.t==='you') return state.name.trim()?[]:['name'];
+  if(s.t==='cap') return s.keys.filter(k=>CAP_REQ.includes(k)&&!capValid(state.cap[k]));
+  if(s.t==='q') return state.tol[s.i]==null?['q']:[];
+  if(s.t==='review') return progress(state).complete?[]:['review'];
+  return [];
+}
+function buildRecord(st){
+  return {
+    schema:'client-risk-profile/1',
+    bandScale:6,
+    questionnaireVersion:QUESTIONNAIRE_VERSION,
+    source:'client-questionnaire',
+    exportedAt:new Date().toISOString(),
+    previousRecordHash:null,
+    client:{name:st.name.trim(),advisor:st.advisor.trim()},
+    profile:st.profile,
+    review:{},
+    inputs:{
+      tolerance:TOL_Q.map((q,i)=>({question:q.q,answer:st.tol[i]?q.opts[st.tol[i]-1]:null,value:st.tol[i],points:st.tol[i]?tolScore(i,st.tol[i]):null})),
+      capacity:st.cap,
+      holdings:HOLD_CLASSES.map((c,i)=>({cls:c.cls,amt:st.hold[i]})).filter(r=>Number(r.amt)>0).map(r=>({cls:r.cls,amt:String(r.amt)})),
+      largestSecurityPct:capValid(st.maxPos)&&Number(st.maxPos)<=100?String(st.maxPos):''
+    },
+    decision:{override:'',rationale:''},
+    register:[], riskSeq:0
+  };
+}
+/* ===== DRAFT (saved on this device only, deleted after 7 days or on request) ===== */
+const DRAFT_KEY='investor-qq-draft-v1', DRAFT_MS=7*24*3600*1000;
+function loadDraft(){
+  try{
+    const raw=localStorage.getItem(DRAFT_KEY); if(!raw) return null;
+    const d=JSON.parse(raw);
+    if(!d||!d.state||Date.now()-d.savedAt>DRAFT_MS){ localStorage.removeItem(DRAFT_KEY); return null; }
+    return d;
+  }catch(e){ return null; }
+}
+function saveDraft(step){ try{ localStorage.setItem(DRAFT_KEY,JSON.stringify({savedAt:Date.now(),step,state})); }catch(e){} }
+function clearDraft(){ try{ localStorage.removeItem(DRAFT_KEY); }catch(e){} }
+function applyDraft(d){
+  const f=freshState(), s=d.state||{};
+  state.name=String(s.name||''); state.advisor=String(s.advisor||'');
+  state.tol=TOL_Q.map((q,i)=>{ const v=Number((s.tol||[])[i]); return v>=1&&v<=q.opts.length?v:null; });
+  Object.keys(f.cap).forEach(k=>{ state.cap[k]=String((s.cap||{})[k]==null?'':s.cap[k]); });
+  const P=s.profile||{};
+  Object.keys(f.profile).forEach(k=>{ if(k!=='insurance'&&k!=='noInsurance') state.profile[k]=String(P[k]==null?'':P[k]); });
+  state.profile.insurance=Array.isArray(P.insurance)?P.insurance.filter(x=>INSURANCE.includes(x)):[];
+  state.profile.noInsurance=!!P.noInsurance;
+  state.hold=HOLD_CLASSES.map((c,i)=>String((s.hold||[])[i]==null?'':s.hold[i]));
+  state.maxPos=String(s.maxPos==null?'':s.maxPos);
+}
+function resetState(){ const f=freshState(); state.name=f.name; state.advisor=f.advisor; state.tol=f.tol; state.cap=f.cap; state.profile=f.profile; state.hold=f.hold; state.maxPos=f.maxPos; }
+
+/* ===== UI ===== */
+let stepIdx=0, showErrors=false, draft=null, focusEl=null;
+const app={};
+if(typeof document!=='undefined'){
+const $ = s=>document.querySelector(s);
+function h(tag, attrs={}, ...kids){
+  const e=document.createElement(tag);
+  for(const [k,v] of Object.entries(attrs||{})){
+    if(k==='class') e.className=v;
+    else if(k.startsWith('on')) e.addEventListener(k.slice(2),v);
+    else if(v!==false && v!=null) e.setAttribute(k,v);
+  }
+  for(const c of kids.flat(Infinity)){ if(c==null||c===false) continue; e.append(c.nodeType?c:document.createTextNode(c)); }
+  return e;
+}
+const touch = ()=>saveDraft(stepIdx);
+const go = n => { stepIdx=Math.max(0,Math.min(steps.length-1,n)); showErrors=false; render(); try{ window.scrollTo(0,0); }catch(e){} };
+
+function fieldFor(f, obj, prefix, bad){
+  const id=prefix+f.k, on=e=>{obj[f.k]=e.target.value;touch();};
+  let control;
+  if(f.type==='select'){
+    const opts=f.opts.map(o=>Array.isArray(o)?{v:o[0],t:o[1]}:{v:o,t:o});
+    control=h('select',{id,onchange:on},h('option',{value:''},'Select'),opts.map(o=>h('option',{value:o.v},o.t)));
+    control.value=obj[f.k];
+  } else if(f.type==='textarea'){
+    control=h('textarea',{id,oninput:on}); control.value=obj[f.k];
+  } else {
+    control=h('input',{id,type:f.type==='number'?'number':'text',min:f.type==='number'?'0':null,step:f.step,inputmode:f.type==='number'?'decimal':null,autocomplete:'off',oninput:on}); control.value=obj[f.k];
+  }
+  return h('div',{class:'field'+(bad?' bad':'')},h('label',{for:id},f.label),f.hint?h('span',{class:'hint'},f.hint):null,control,bad?h('p',{class:'err'},'Required'):null);
+}
+function screenFor(s){
+  const wrap=h('div',{});
+  const title=t=>{ const e=h('h2',{tabindex:'-1'},t); focusEl=e; return e; };
+  if(s.t==='welcome'){
+    const e=h('h1',{tabindex:'-1'},'Tell us about you and your money'); focusEl=e;
+    wrap.append(e,
+      h('p',{class:'lede'},'Your advisor uses your answers to understand your goals, your finances and how you feel about risk. It takes about 10 minutes. There are no right or wrong answers, and best estimates are fine.'),
+      h('ol',{class:'route'},SECTIONS.map((x,i)=>h('li',{class:i===0?'here':''},h('b',{},x.name),h('span',{},x.desc)))));
+    if(draft){
+      wrap.append(h('div',{class:'resume'},h('p',{},h('strong',{},'Welcome back. '),'Your answers are saved on this device.'),
+        h('button',{type:'button',class:'btn wide',onclick:()=>{ applyDraft(draft); go(Math.min(Number(draft.step)||0,steps.length-1)); }},'Continue where I left off'),
+        h('button',{type:'button',class:'btn ghost wide',onclick:()=>{ if(window.confirm('Delete the saved answers and start over?')){ clearDraft(); resetState(); draft=null; render(); } }},'Start over')));
+    } else wrap.append(h('button',{type:'button',class:'btn wide',onclick:()=>go(1)},'Start'));
+    wrap.append(h('p',{class:'fine',id:'privacy-note'},'Nothing is sent anywhere while you fill this in. Your progress is saved on this device only, so you can leave and come back. At the end you send a file to your advisor, then you can delete your answers from this device.'));
+  }
+  else if(s.t==='you'){
+    wrap.append(title('About you'));
+    const miss=showErrors&&!state.name.trim();
+    const nm=h('input',{id:'name',type:'text',autocomplete:'name',oninput:e=>{state.name=e.target.value;touch();}}); nm.value=state.name;
+    const ad=h('input',{id:'advisor',type:'text',autocomplete:'off',oninput:e=>{state.advisor=e.target.value;touch();}}); ad.value=state.advisor;
+    wrap.append(h('div',{class:'field'+(miss?' bad':'')},h('label',{for:'name'},'Your name'),nm,miss?h('p',{class:'err'},'Required'):null),
+                h('div',{class:'field'},h('label',{for:'advisor'},'Your advisor\u2019s name'),ad));
+  }
+  else if(s.t==='profile'){
+    wrap.append(title(s.title),h('p',{class:'lede'},'Optional. The more you share, the better your advisor can help.'));
+    s.keys.forEach(k=>wrap.append(fieldFor(PF.find(f=>f.k===k),state.profile,'pf-',false)));
+  }
+  else if(s.t==='ins'){
+    wrap.append(title('Insurance you have'),h('p',{class:'lede'},'Optional. Tick all that apply.'));
+    const boxes={};
+    const sync=changed=>{
+      const P=state.profile;
+      if(changed==='__none' && boxes.__none.checked) INSURANCE.forEach(n=>{boxes[n].checked=false;});
+      else if(changed!=='__none') boxes.__none.checked=false;
+      P.insurance=INSURANCE.filter(n=>boxes[n].checked); P.noInsurance=boxes.__none.checked; touch();
+    };
+    const opt=(label,key,checked)=>{ const i=h('input',{type:'checkbox',onchange:()=>sync(key)}); i.checked=checked; boxes[key]=i; return h('label',{class:'opt'},i,h('span',{},label)); };
+    INSURANCE.forEach(n=>wrap.append(opt(n,n,state.profile.insurance.includes(n))));
+    wrap.append(opt('None of these','__none',state.profile.noInsurance));
+  }
+  else if(s.t==='cap'){
+    wrap.append(title(s.title),h('p',{class:'lede'},'Estimates are fine.'));
+    s.keys.forEach(k=>{ const f=CAP_FIELDS.find(x=>x.k===k); wrap.append(fieldFor(f,state.cap,'cap-',showErrors&&CAP_REQ.includes(k)&&!capValid(state.cap[k]))); });
+  }
+  else if(s.t==='hold'){
+    wrap.append(title(s.title),
+      h('p',{class:'lede'},'Optional. Enter what you own today, in dollars. Estimates are fine, and you can skip anything you are unsure about.'));
+    if(s.part.startsWith('1')) wrap.append(h('div',{class:'note'},h('p',{},'Own a mixed fund, such as a target-date fund? Split the amount across what it holds, or leave it blank and tell your advisor.')));
+    s.keys.forEach(i=>{
+      const c=HOLD_CLASSES[i], id='hold-'+c.cls;
+      const inp=h('input',{id,type:'number',min:'0',step:'100',inputmode:'decimal',autocomplete:'off',placeholder:'$',oninput:e=>{state.hold[i]=e.target.value;touch();}}); inp.value=state.hold[i];
+      wrap.append(h('div',{class:'field'},h('label',{for:id},c.label),h('span',{class:'hint'},c.hint),inp));
+    });
+    if(s.maxPos){
+      const mp=h('input',{id:'maxpos',type:'number',min:'0',max:'100',step:'1',inputmode:'decimal',autocomplete:'off',placeholder:'%',oninput:e=>{state.maxPos=e.target.value;touch();}}); mp.value=state.maxPos;
+      wrap.append(h('div',{class:'field'},h('label',{for:'maxpos'},'Largest single holding, as a percent of your investments'),h('span',{class:'hint'},'The one stock or fund that is the biggest part of your investments. Leave blank if you are not sure.'),mp));
+    }
+  }
+  else if(s.t==='q'){
+    const q=TOL_Q[s.i];
+    const fs=h('fieldset',{});
+    const lg=h('legend',{tabindex:'-1'},q.q); focusEl=lg;
+    fs.append(lg);
+    q.opts.forEach((o,oi)=>{
+      const r=h('input',{type:'radio',name:'q'+s.i,value:String(oi+1),onchange:()=>{ state.tol[s.i]=oi+1; touch(); const at=stepIdx; setTimeout(()=>{ if(stepIdx===at) go(stepIdx+1); },220); }});
+      r.checked=state.tol[s.i]===oi+1;
+      fs.append(h('label',{class:'opt'},r,h('span',{},o)));
+    });
+    wrap.append(fs);
+    if(showErrors&&state.tol[s.i]==null) wrap.append(h('p',{class:'err'},'Choose an answer to continue.'));
+  }
+  else if(s.t==='review'){
+    const p=progress(state);
+    wrap.append(title('Review'));
+    wrap.append(p.complete ? h('p',{class:'ok'},'Everything required is filled in.') : h('p',{class:'lede'},'Still needed before you can send your answers:'));
+    if(!p.complete) wrap.append(h('ul',{class:'miss'},p.missing.map(m=>h('li',{},h('span',{},m.label),h('button',{type:'button',class:'btn ghost',onclick:()=>go(m.go)},'Go')))));
+    const rows=[
+      ['Your name', state.name.trim()||'Needed'],
+      ['Required finance fields', p.capDone+' of '+CAP_REQ.length],
+      ['Risk questions', p.tolDone+' of '+TOL_Q.length],
+      ['Your investments', p.holdCount?'$'+Math.round(p.holdTotal).toLocaleString('en-US')+' in '+p.holdCount+(p.holdCount===1?' type':' types'):'Not entered']
+    ];
+    wrap.append(h('ul',{class:'sum'},rows.map(r=>h('li',{},h('span',{},r[0]),h('b',{},r[1])))));
+    if(!p.holdCount) wrap.append(h('p',{class:'fine'},'If you skip your investments, your advisor will add them from your statements.'));
+  }
+  else if(s.t==='finish'){
+    wrap.append(h('div',{class:'done-badge','aria-hidden':'true'}),title('Send your answers to your advisor'),
+      h('p',{class:'lede'},'Your answers are ready. If your firm gave you a secure upload link, use that instead of regular email, because the file contains personal and financial details.'));
+    const status=h('p',{class:'status',role:'status',id:'dl-status'});
+    const canShare=(typeof navigator!=='undefined'&&typeof navigator.canShare==='function'&&typeof File!=='undefined');
+    if(canShare) wrap.append(h('button',{type:'button',class:'btn wide',onclick:async()=>{ await sendFile(true,status); }},'Send to my advisor'));
+    wrap.append(h('button',{type:'button',class:canShare?'btn ghost wide':'btn wide',onclick:async()=>{ await sendFile(false,status); }},'Download my answers'),status,
+      h('p',{class:'fine'},'When you have sent the file, you can delete your answers from this device.'),
+      h('button',{type:'button',class:'btn ghost wide',onclick:()=>{ if(window.confirm('Delete your answers from this device? Make sure you have sent the file first.')){ clearDraft(); resetState(); draft=null; go(0); } }},'Delete my answers from this device'));
+  }
+  return wrap;
+}
+async function sha256(str){
+  try{
+    if(!(window.crypto && crypto.subtle)) return null;
+    const buf=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(str));
+    return [...new Uint8Array(buf)].map(b=>b.toString(16).padStart(2,'0')).join('');
+  }catch(e){ return null; }
+}
+async function makeFile(){
+  const rec=buildRecord(state), hash=await sha256(JSON.stringify(rec));
+  const slug=(state.name.trim()||'client').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')||'client';
+  const out={record:rec,note:'Client questionnaire. Load this file in the advisor risk profile tool.'};
+  if(hash) out.sha256=hash;
+  return {text:JSON.stringify(out,null,2), name:'risk-questionnaire-'+slug+'-'+isoDate()+'.json'};
+}
+async function sendFile(viaShare,status){
+  if(!progress(state).complete){ status.textContent='Some required answers are missing. Go back to the review.'; return; }
+  const f=await makeFile();
+  try{
+    if(viaShare){
+      const file=new File([f.text],f.name,{type:'application/json'});
+      if(navigator.canShare({files:[file]})){ await navigator.share({files:[file],title:'Investor questionnaire'}); status.textContent='Shared. You can now delete your answers from this device.'; return; }
+    }
+    const url=URL.createObjectURL(new Blob([f.text],{type:'application/json'}));
+    const a=h('a',{href:url,download:f.name}); document.body.append(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),1000);
+    status.textContent='Downloaded. Now send the file to your advisor.';
+  }catch(e){ if(e&&e.name==='AbortError') return; status.textContent='Could not send the file. Try Download my answers instead.'; }
+}
+const waypoints=[];
+/* Position on the course line, 0 to 100. Waypoints sit at equal spacing; the buoy moves between them as the client works through a section. */
+function courseAt(i){
+  const sec=SECTION_OF[steps[i].t]; if(sec<0) return 0;
+  const first=SECTIONS[sec].start, n=(SECTIONS[sec+1]?SECTIONS[sec+1].start:steps.length)-first;
+  return Math.min(100,(sec+(i-first)/n)/(SECTIONS.length-1)*100);
+}
+function buildCourse(){
+  const track=$('#track');
+  SECTIONS.forEach((x,i)=>{ const at=i/(SECTIONS.length-1)*100; const w=h('i',{class:'wp',style:'left:'+at+'%'}); waypoints.push({el:w,at}); track.append(w); });
+  const bu=$('#buoy'); if(bu&&bu.parentNode===track){ track.append(bu); }
+}
+function render(){
+  const s=steps[stepIdx], pct=Math.round(courseAt(stepIdx)), sec=SECTION_OF[s.t];
+  $('#fill').style.width=pct+'%';
+  $('#buoy').style.left=pct+'%';
+  waypoints.forEach(w=>w.el.className='wp'+(pct>=w.at-0.5?' done':''));
+  $('#track').setAttribute('aria-valuenow',String(pct));
+  $('#m-left').textContent = sec>=0 ? SECTIONS[sec].name : '';
+  $('#m-right').textContent = s.t==='q' ? 'Question '+(s.i+1)+' of '+TOL_Q.length : (s.t==='cap'||s.t==='hold') ? 'Part '+s.part : '';
+  focusEl=null;
+  const scr=$('#screen'); scr.replaceChildren(screenFor(s));
+  const foot=$('#foot'), onWelcome=s.t==='welcome', onFinish=s.t==='finish';
+  foot.hidden = onWelcome||onFinish;
+  $('#back').disabled = stepIdx===0;
+  const nx=$('#next');
+  nx.textContent = s.t==='review'?'Continue':'Next';
+  nx.disabled = s.t==='review' ? !progress(state).complete : false;
+  if(stepIdx>0) saveDraft(stepIdx);
+  if(focusEl&&focusEl.focus){ try{ focusEl.focus({preventScroll:true}); }catch(e){} }
+}
+$('#back').addEventListener('click',()=>go(stepIdx-1));
+$('#next').addEventListener('click',()=>{
+  const miss=stepMissing(steps[stepIdx]);
+  if(miss.length){ showErrors=true; render(); return; }
+  go(stepIdx+1);
+});
+draft=loadDraft();
+buildCourse();
+render();
+app.go=go; app.render=render; app.getStep=()=>stepIdx; app.getDraft=()=>draft; app.setDraft=d=>{draft=d;};
+}
+if(typeof window!=='undefined') window.__app=Object.assign(app,{state,steps,stepMissing,progress,buildRecord,loadDraft,saveDraft,clearDraft,applyDraft,resetState,IDX});
+</script>
+</body>
+</html>
