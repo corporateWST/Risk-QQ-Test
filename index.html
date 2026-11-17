@@ -126,8 +126,15 @@ button{font:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent}
 .btn.ghost{background:transparent;color:var(--text);border-color:var(--line)}
 .btn[disabled]{opacity:.38;cursor:not-allowed}
 .btn.wide{width:100%;margin:0 0 12px}
-nav.foot{position:sticky;bottom:0;display:flex;gap:12px;padding:12px 20px max(14px,env(safe-area-inset-bottom));background:var(--mist);border-top:1px solid var(--line)}
+nav.foot{position:sticky;bottom:0;display:flex;flex-wrap:wrap;gap:12px;padding:12px 20px max(14px,env(safe-area-inset-bottom));background:var(--mist);border-top:1px solid var(--line)}
 @supports (backdrop-filter:blur(8px)){ nav.foot{background:color-mix(in srgb,var(--mist) 90%,transparent);backdrop-filter:blur(10px)} }
+.meter{flex:1 0 100%;margin:0 0 -2px}
+.meter .mt{display:flex;justify-content:space-between;gap:12px;font-size:14px;margin:0 0 6px;color:var(--muted)}
+.meter .mt b{color:var(--text)}
+.meter .mbar{height:8px;border-radius:4px;background:var(--line);overflow:hidden}
+.meter .mbar i{display:block;height:100%;width:0;border-radius:4px;background:var(--tide);transition:width .2s ease}
+.meter.full .mt,.meter.full .mt b{color:var(--ok)} .meter.full .mbar i{background:var(--ok)}
+.meter.over .mt,.meter.over .mt b{color:var(--bad)} .meter.over .mbar i{background:var(--bad)}
 nav.foot #back{flex:0 0 32%}
 nav.foot #next{flex:1}
 nav.foot[hidden]{display:none}
@@ -157,6 +164,7 @@ ul.miss .btn{min-height:42px;padding:0 18px;flex:none}
   </header>
   <main id="screen" tabindex="-1" aria-live="polite"></main>
   <nav class="foot" id="foot">
+    <div class="meter" id="meter" hidden><div class="mt"><span id="meter-text"></span><b id="meter-pct"></b></div><div class="mbar"><i id="meter-fill"></i></div></div>
     <button type="button" class="btn ghost" id="back">Back</button>
     <button type="button" class="btn" id="next">Next</button>
   </nav>
@@ -236,7 +244,7 @@ const freshState = () => ({
   name:'', advisor:'', tol:Array(TOL_Q.length).fill(null),
   cap:{horizon:'',income:'',emergency:'',withdrawal:'',liquidity:'',networth:'',debt:'',dependents:''},
   profile:blankProfile(),
-  hold:Array(12).fill(''), maxPos:''
+  hold:Array(12).fill(''), maxPos:'', holdTotal:''
 });
 const state = freshState();
 const CAP_REQ=['horizon','income','emergency','withdrawal','liquidity','debt','dependents'];
@@ -285,7 +293,7 @@ const SECTIONS=[
   {name:'Review and send', desc:'Check your answers, then send them to your advisor.'}
 ];
 SECTIONS.forEach((x,i)=>{ x.start=steps.findIndex(s=>SECTION_OF[s.t]===i); });
-const IDX={you:1, cap:steps.findIndex(s=>s.t==='cap'), q:steps.findIndex(s=>s.t==='q'), review:steps.findIndex(s=>s.t==='review')};
+const IDX={hold:steps.findIndex(s=>s.t==='hold'), you:1, cap:steps.findIndex(s=>s.t==='cap'), q:steps.findIndex(s=>s.t==='q'), review:steps.findIndex(s=>s.t==='review')};
 
 function progress(st){
   const tolDone=st.tol.filter(v=>v!=null).length;
@@ -294,16 +302,30 @@ function progress(st){
   if(!st.name.trim()) missing.push({label:'Your name', go:IDX.you});
   if(capDone<CAP_REQ.length) missing.push({label:(CAP_REQ.length-capDone)+' required '+(CAP_REQ.length-capDone===1?'field':'fields')+' in Your finances', go:IDX.cap});
   if(tolDone<TOL_Q.length){ const first=st.tol.findIndex(v=>v==null); missing.push({label:(TOL_Q.length-tolDone)+' '+(TOL_Q.length-tolDone===1?'question':'questions')+' about risk', go:IDX.q+first}); }
-  const holdRows=HOLD_CLASSES.map((c,i)=>({cls:c.cls,amt:st.hold[i]})).filter(r=>Number(r.amt)>0);
-  return {tolDone,capDone,missing,complete:missing.length===0,holdCount:holdRows.length,holdTotal:holdRows.reduce((a,r)=>a+Number(r.amt),0)};
+  /* Investments are entered as percentages. If any are entered they must add up to 100, and a total value is needed to turn them into dollars. */
+  const pcts=HOLD_CLASSES.map((c,i)=>Number(st.hold[i])>0?Number(st.hold[i]):0);
+  const holdPct=Math.round(pcts.reduce((a,b)=>a+b,0)*100)/100, holdCount=pcts.filter(v=>v>0).length, holdValue=Number(st.holdTotal)>0?Number(st.holdTotal):0;
+  const holdIssue = holdCount===0 ? null : Math.abs(holdPct-100)>0.01 ? 'pct' : !holdValue ? 'total' : null;
+  if(holdIssue==='pct') missing.push({label:'Your investments add up to '+holdPct+'%, not 100%', go:IDX.hold});
+  if(holdIssue==='total') missing.push({label:'Your investments: add the approximate total value', go:IDX.hold});
+  return {tolDone,capDone,missing,complete:missing.length===0,holdCount,holdPct,holdValue,holdIssue};
 }
 /* What is still missing on one screen. Returns a list of keys. */
 function stepMissing(s){
   if(s.t==='you') return state.name.trim()?[]:['name'];
   if(s.t==='cap') return s.keys.filter(k=>CAP_REQ.includes(k)&&!capValid(state.cap[k]));
   if(s.t==='q') return state.tol[s.i]==null?['q']:[];
+  if(s.t==='hold'&&s.maxPos) return progress(state).holdIssue?['hold']:[];
   if(s.t==='review') return progress(state).complete?[]:['review'];
   return [];
+}
+/* Turn the percentages and the total value into dollar amounts per asset class, the way the advisor tool stores them. */
+function holdingsFrom(st){
+  const total=Number(st.holdTotal);
+  const rows=HOLD_CLASSES.map((c,i)=>({cls:c.cls,pct:Number(st.hold[i])})).filter(r=>r.pct>0);
+  if(!rows.length||!(total>0)) return [];
+  const sum=rows.reduce((a,r)=>a+r.pct,0);
+  return rows.map(r=>({cls:r.cls,amt:String(Math.round(total*r.pct/sum))}));
 }
 function buildRecord(st){
   return {
@@ -319,7 +341,7 @@ function buildRecord(st){
     inputs:{
       tolerance:TOL_Q.map((q,i)=>({question:q.q,answer:st.tol[i]?q.opts[st.tol[i]-1]:null,value:st.tol[i],points:st.tol[i]?tolScore(i,st.tol[i]):null})),
       capacity:st.cap,
-      holdings:HOLD_CLASSES.map((c,i)=>({cls:c.cls,amt:st.hold[i]})).filter(r=>Number(r.amt)>0).map(r=>({cls:r.cls,amt:String(r.amt)})),
+      holdings:holdingsFrom(st),
       largestSecurityPct:capValid(st.maxPos)&&Number(st.maxPos)<=100?String(st.maxPos):''
     },
     decision:{override:'',rationale:''},
@@ -336,7 +358,7 @@ function loadDraft(){
     return d;
   }catch(e){ return null; }
 }
-function saveDraft(step){ try{ localStorage.setItem(DRAFT_KEY,JSON.stringify({savedAt:Date.now(),step,state})); }catch(e){} }
+function saveDraft(step){ try{ localStorage.setItem(DRAFT_KEY,JSON.stringify({savedAt:Date.now(),step,ver:2,state})); }catch(e){} }
 function clearDraft(){ try{ localStorage.removeItem(DRAFT_KEY); }catch(e){} }
 function applyDraft(d){
   const f=freshState(), s=d.state||{};
@@ -347,10 +369,13 @@ function applyDraft(d){
   Object.keys(f.profile).forEach(k=>{ if(k!=='insurance'&&k!=='noInsurance') state.profile[k]=String(P[k]==null?'':P[k]); });
   state.profile.insurance=Array.isArray(P.insurance)?P.insurance.filter(x=>INSURANCE.includes(x)):[];
   state.profile.noInsurance=!!P.noInsurance;
-  state.hold=HOLD_CLASSES.map((c,i)=>String((s.hold||[])[i]==null?'':s.hold[i]));
-  state.maxPos=String(s.maxPos==null?'':s.maxPos);
+  /* Drafts saved before version 2 held dollar amounts here, so they are not reused as percentages. */
+  const keep=d.ver===2;
+  state.hold=HOLD_CLASSES.map((c,i)=>keep?String((s.hold||[])[i]==null?'':s.hold[i]):'');
+  state.maxPos=keep?String(s.maxPos==null?'':s.maxPos):'';
+  state.holdTotal=keep?String(s.holdTotal==null?'':s.holdTotal):'';
 }
-function resetState(){ const f=freshState(); state.name=f.name; state.advisor=f.advisor; state.tol=f.tol; state.cap=f.cap; state.profile=f.profile; state.hold=f.hold; state.maxPos=f.maxPos; }
+function resetState(){ const f=freshState(); state.name=f.name; state.advisor=f.advisor; state.tol=f.tol; state.cap=f.cap; state.profile=f.profile; state.hold=f.hold; state.maxPos=f.maxPos; state.holdTotal=f.holdTotal; }
 
 /* ===== UI ===== */
 let stepIdx=0, showErrors=false, draft=null, focusEl=null;
@@ -369,7 +394,15 @@ function h(tag, attrs={}, ...kids){
   for(const c of kids.flat(Infinity)){ if(c==null||c===false) continue; e.append(c.nodeType?c:document.createTextNode(c)); }
   return e;
 }
-const touch = ()=>saveDraft(stepIdx);
+const touch = ()=>{ saveDraft(stepIdx); updateMeter(); };
+function updateMeter(){
+  const m=$('#meter'); if(!m) return;
+  const p=progress(state), pct=Math.min(100,p.holdPct);
+  m.className='meter'+(p.holdCount&&Math.abs(p.holdPct-100)<=0.01?' full':p.holdPct>100?' over':'');
+  $('#meter-fill').style.width=pct+'%';
+  $('#meter-pct').textContent=p.holdCount?p.holdPct+'%':'0%';
+  $('#meter-text').textContent=!p.holdCount?'Nothing entered yet. This section is optional.':Math.abs(p.holdPct-100)<=0.01?'All 100% allocated':p.holdPct>100?'Over by '+Math.round((p.holdPct-100)*100)/100+'%. Lower a percentage.':'Allocated, '+Math.round((100-p.holdPct)*100)/100+'% left';
+}
 /* Every screen is a history entry, so the phone's back swipe or back button moves one screen back instead of leaving the questionnaire. */
 const sid = Date.now().toString(36)+Math.random().toString(36).slice(2,6);   /* marks this page load, so entries left over from before a reload are ignored */
 const clampStep = n => Math.max(0,Math.min(steps.length-1,n));
@@ -423,34 +456,47 @@ function goalsField(){
     h('div',{class:'field'},h('label',{for:'pf-goalsNote'},'Anything to add about your goals or timing?'),h('span',{class:'hint'},'For example, "college in 8 years" or "retire at 62".'),note));
 }
 const SLIDERS={
-  horizon:{key:'horizon',unit:'year',label:'Years until a large withdrawal might be needed',max:30,start:15,ticks:[0,5,10,15,20,25,30],last:'30+',
+  horizon:{key:'horizon',stepLabel:'One year',label:'Years until a large withdrawal might be needed',max:30,start:15,ticks:[0,5,10,15,20,25,30],last:'30+',
     text:v=>v<=0?'Less than 1 year':v===1?'1 year':v>=30?'30 or more years':v+' years',
     hint:'Drag the slider, or use the minus and plus buttons. Choose 0 if you may need it within a year.'},
-  emergency:{key:'emergency',unit:'month',label:'Emergency reserves, in months',max:24,start:6,ticks:[0,6,12,18,24],last:'24+',
+  emergency:{key:'emergency',stepLabel:'One month',label:'Emergency reserves, in months',max:24,start:6,ticks:[0,6,12,18,24],last:'24+',
     text:v=>v<=0?'None':v===1?'1 month':v>=24?'24 or more months':v+' months',
-    hint:'Cash outside this portfolio, in months of spending. Drag the slider, or use the minus and plus buttons. Choose 0 if you have none.'}
+    hint:'Cash outside this portfolio, in months of spending. Drag the slider, or use the minus and plus buttons. Choose 0 if you have none.'},
+  withdrawal:{key:'withdrawal',stepLabel:'Half a percent',label:'Planned withdrawals, % per year',max:12,step:0.5,start:3,ticks:[0,2,4,6,8,10,12],last:'12+',
+    text:v=>v<=0?'None':v>=12?'12% or more a year':v+'% a year',
+    hint:'Over the next five years. Drag the slider, or use the minus and plus buttons. Choose 0 if none.'},
+  liquidity:{key:'liquidity',stepLabel:'One percent',label:'Large expenses within 5 years, % of portfolio',max:50,start:10,ticks:[0,10,20,30,40,50],last:'50+',
+    text:v=>v<=0?'None':v>=50?'50% or more of your portfolio':v+'% of your portfolio',
+    hint:'Home purchase, tuition, and similar. Drag the slider, or use the minus and plus buttons. Choose 0 if none.'},
+  dependents:{key:'dependents',stepLabel:'One person',label:'Financial dependents',max:8,start:1,ticks:[0,1,2,3,4,5,6,7,8],last:'8+',
+    text:v=>v<=0?'None':v===1?'1 person':v>=8?'8 or more people':v+' people',
+    hint:'People who rely on you financially. Drag the slider, or use the minus and plus buttons. Choose 0 if none.'},
+  historyYears:{key:'historyYears',store:'profile',optional:true,stepLabel:'One year',label:'Years investing',max:40,start:10,ticks:[0,10,20,30,40],last:'40+',
+    text:v=>v<=0?'Less than 1 year':v===1?'1 year':v>=40?'40 or more years':v+' years',
+    hint:'Optional. Drag the slider, or use the minus and plus buttons. Leave it alone if you are not sure.'}
 };
 function rangeField(cfg,bad){
-  const max=cfg.max, id='cap-'+cfg.key, raw0=state.cap[cfg.key], chosen0=capValid(raw0);
-  const start=chosen0?Math.min(max,Math.max(0,Math.round(Number(raw0)))):cfg.start;
+  const store=state[cfg.store||'cap'], max=cfg.max, step=cfg.step||1, id=(cfg.store==='profile'?'pf-':'cap-')+cfg.key;
+  const okv=v=>v!==''&&v!=null&&Number.isFinite(Number(v))&&Number(v)>=0;
+  const snap=v=>Math.round(Math.max(0,Math.min(max,Math.round(v/step)*step))*100)/100;
   const shown=v=>cfg.text(Math.min(max,v));
+  const raw0=store[cfg.key], chosen0=okv(raw0), start=chosen0?snap(Number(raw0)):cfg.start;
   const out=h('div',{class:'hz-out'+(chosen0?'':' unset'),'aria-hidden':'true'},chosen0?shown(Number(raw0)):'Slide to choose');
-  const rng=h('input',{id,type:'range',min:'0',max:String(max),step:'1','aria-label':cfg.label});
+  const rng=h('input',{id,type:'range',min:'0',max:String(max),step:String(step),'aria-label':cfg.label});
   rng.value=String(start); rng.setAttribute('style','--pct:'+(start/max*100)+'%');
   const box=h('div',{class:'field hz'+(chosen0?'':' unset')+(bad?' bad':'')});
-  const errEl=bad?h('p',{class:'err'},'Required'):null;
+  const errEl=(bad&&!cfg.optional)?h('p',{class:'err'},'Required'):null;
   const apply=v=>{
-    v=Math.max(0,Math.min(max,Math.round(v)));
-    rng.value=String(v); state.cap[cfg.key]=String(v);
+    v=snap(v); rng.value=String(v); store[cfg.key]=String(v);
     out.textContent=shown(v); out.className='hz-out';
     rng.setAttribute('aria-valuetext',shown(v)); rng.setAttribute('style','--pct:'+(v/max*100)+'%');
     box.className='field hz'; if(errEl) errEl.hidden=true; touch();
   };
-  const set=()=>capValid(state.cap[cfg.key]);
-  const cur=()=>Math.min(max,Number(state.cap[cfg.key]));
+  const isSet=()=>okv(store[cfg.key]);
+  const cur=()=>Math.min(max,Number(store[cfg.key]));
   rng.addEventListener('input',e=>apply(Number(e.target.value)));
-  const minus=h('button',{type:'button',class:'step','aria-label':'One '+cfg.unit+' less',onclick:()=>apply(set()?cur()-1:cfg.start-1)},'\u2212');
-  const plus=h('button',{type:'button',class:'step','aria-label':'One '+cfg.unit+' more',onclick:()=>apply(set()?cur()+1:cfg.start+1)},'+');
+  const minus=h('button',{type:'button',class:'step','aria-label':cfg.stepLabel+' less',onclick:()=>apply(isSet()?cur()-step:cfg.start-step)},'\u2212');
+  const plus=h('button',{type:'button',class:'step','aria-label':cfg.stepLabel+' more',onclick:()=>apply(isSet()?cur()+step:cfg.start+step)},'+');
   const ticks=h('div',{class:'hz-ticks','aria-hidden':'true'},cfg.ticks.map(n=>h('span',{style:'left:'+(n/max*100)+'%'},n===max?cfg.last:String(n))));
   box.append(h('label',{for:id},cfg.label),h('span',{class:'hint'},cfg.hint),out,
     h('div',{class:'hz-row'},minus,h('div',{class:'hz-track'},rng,ticks),plus));
@@ -483,7 +529,7 @@ function screenFor(s){
   }
   else if(s.t==='profile'){
     wrap.append(title(s.title),h('p',{class:'lede'},'Optional. The more you share, the better your advisor can help.'));
-    s.keys.forEach(k=>wrap.append(k==='history'?historyField():k==='goals'?goalsField():fieldFor(PF.find(f=>f.k===k),state.profile,'pf-',false)));
+    s.keys.forEach(k=>wrap.append(k==='history'?historyField():k==='goals'?goalsField():SLIDERS[k]?rangeField(SLIDERS[k],false):fieldFor(PF.find(f=>f.k===k),state.profile,'pf-',false)));
   }
   else if(s.t==='ins'){
     wrap.append(title('Insurance you have'),h('p',{class:'lede'},'Optional. Tick all that apply.'));
@@ -503,18 +549,30 @@ function screenFor(s){
     s.keys.forEach(k=>{ const bad=showErrors&&CAP_REQ.includes(k)&&!capValid(state.cap[k]); const f=CAP_FIELDS.find(x=>x.k===k); wrap.append(SLIDERS[k]?rangeField(SLIDERS[k],bad):fieldFor(f,state.cap,'cap-',bad)); });
   }
   else if(s.t==='hold'){
+    const first=s.part.startsWith('1');
     wrap.append(title(s.title),
-      h('p',{class:'lede'},'Optional. Enter what you own today, in dollars. Estimates are fine, and you can skip anything you are unsure about.'));
-    if(s.part.startsWith('1')) wrap.append(h('div',{class:'note'},h('p',{},'Own a mixed fund, such as a target-date fund? Split the amount across what it holds, or leave it blank and tell your advisor.')));
+      h('p',{class:'lede'},first
+        ?'Optional. Enter what you own today as a percent of all your investments. The percentages on these two screens need to add up to 100%. Estimates are fine, and you can skip this section.'
+        :'Keep going until the meter at the bottom shows 100%.'));
+    if(first){
+      wrap.append(h('div',{class:'note'},h('p',{},'Own a mixed fund, such as a target-date fund? Split the percent across what it holds, or leave it blank and tell your advisor.')));
+      const tv=h('input',{id:'hold-total',type:'number',min:'0',step:'1000',inputmode:'decimal',autocomplete:'off',placeholder:'$',oninput:e=>{state.holdTotal=e.target.value;touch();}}); tv.value=state.holdTotal;
+      wrap.append(h('div',{class:'field'},h('label',{for:'hold-total'},'Approximate total value of your investments ($)'),h('span',{class:'hint'},'Add up everything you list on these screens. It turns your percentages into dollar amounts for your advisor.'),tv));
+    }
     s.keys.forEach(i=>{
       const c=HOLD_CLASSES[i], id='hold-'+c.cls;
-      const inp=h('input',{id,type:'number',min:'0',step:'100',inputmode:'decimal',autocomplete:'off',placeholder:'$',oninput:e=>{state.hold[i]=e.target.value;touch();}}); inp.value=state.hold[i];
-      wrap.append(h('div',{class:'field'},h('label',{for:id},c.label),h('span',{class:'hint'},c.hint),inp));
+      const inp=h('input',{id,type:'number',min:'0',max:'100',step:'any',inputmode:'decimal',autocomplete:'off',placeholder:'%',oninput:e=>{state.hold[i]=e.target.value;touch();}}); inp.value=state.hold[i];
+      wrap.append(h('div',{class:'field'},h('label',{for:id},c.label+', % of your investments'),h('span',{class:'hint'},c.hint),inp));
     });
     if(s.maxPos){
       const mp=h('input',{id:'maxpos',type:'number',min:'0',max:'100',step:'1',inputmode:'decimal',autocomplete:'off',placeholder:'%',oninput:e=>{state.maxPos=e.target.value;touch();}}); mp.value=state.maxPos;
       wrap.append(h('div',{class:'field'},h('label',{for:'maxpos'},'Largest single holding, as a percent of your investments'),h('span',{class:'hint'},'The one stock or fund that is the biggest part of your investments. Leave blank if you are not sure.'),mp));
+      const p=progress(state);
+      if(showErrors&&p.holdIssue) wrap.append(h('p',{class:'err'},p.holdIssue==='pct'
+        ?'Your investments add up to '+p.holdPct+'%, not 100%. Adjust the percentages, or clear them to skip this section.'
+        :'Add the approximate total value on the first investments screen.'));
     }
+    wrap.append(h('button',{type:'button',class:'btn ghost wide',onclick:()=>{ if(window.confirm('Clear everything you entered about your investments?')){ state.hold=Array(12).fill(''); state.holdTotal=''; state.maxPos=''; touch(); render(); } }},'Clear my investments'));
   }
   else if(s.t==='q'){
     const q=TOL_Q[s.i];
@@ -538,7 +596,7 @@ function screenFor(s){
       ['Your name', state.name.trim()||'Needed'],
       ['Required finance fields', p.capDone+' of '+CAP_REQ.length],
       ['Risk questions', p.tolDone+' of '+TOL_Q.length],
-      ['Your investments', p.holdCount?'$'+Math.round(p.holdTotal).toLocaleString('en-US')+' in '+p.holdCount+(p.holdCount===1?' type':' types'):'Not entered']
+      ['Your investments', p.holdCount?p.holdPct+'% allocated'+(p.holdValue?', about $'+Math.round(p.holdValue).toLocaleString('en-US'):''):'Not entered']
     ];
     wrap.append(h('ul',{class:'sum'},rows.map(r=>h('li',{},h('span',{},r[0]),h('b',{},r[1])))));
     if(!p.holdCount) wrap.append(h('p',{class:'fine'},'If you skip your investments, your advisor will add them from your statements.'));
@@ -609,6 +667,7 @@ function render(){
   const scr=$('#screen'); scr.replaceChildren(screenFor(s));
   const foot=$('#foot'), onWelcome=s.t==='welcome', onFinish=s.t==='finish';
   foot.hidden = onWelcome||onFinish;
+  $('#meter').hidden = s.t!=='hold'; updateMeter();
   $('#back').disabled = stepIdx===0;
   const nx=$('#next');
   nx.textContent = s.t==='review'?'Continue':'Next';
