@@ -152,6 +152,26 @@ ul.miss .btn{min-height:42px;padding:0 18px;flex:none}
 .done-badge{width:68px;height:68px;margin:22px 0 4px;border-radius:50%;background:var(--tide);display:grid;place-content:center}
 .done-badge::after{content:"";width:16px;height:30px;margin-top:-5px;border:solid #fff;border-width:0 5px 5px 0;transform:rotate(45deg)}
 @media (prefers-reduced-motion:reduce){ .course .fill,.course .buoy,.course .wp,.opt{transition:none} }
+
+/* why we ask, consent, review rows and the confirmation */
+.why{margin:0 0 10px;font-size:15px}
+.why summary{cursor:pointer;color:var(--tide);font-weight:600;min-height:32px;display:flex;align-items:center}
+.why p{margin:4px 0 4px;color:var(--muted)}
+.draftbox{border:1.5px solid var(--bad);color:var(--bad);border-radius:12px;padding:10px 14px;margin:0 0 16px;font-weight:600;font-size:15px}
+.cblock{margin:0 0 16px}.cblock strong{display:block;font-family:var(--serif);font-size:19px;font-weight:600}.cblock p{margin:2px 0 0;color:var(--muted)}
+h3.rv-h{font-family:var(--serif);font-size:21px;font-weight:600;margin:22px 0 4px}
+ul.rv{list-style:none;margin:0;padding:0}
+ul.rv li{border-bottom:1px solid var(--line)}
+.rowbtn{display:flex;width:100%;align-items:center;gap:12px;min-height:56px;padding:10px 0;background:none;border:0;text-align:left;color:var(--text)}
+.rowbtn .rl{flex:0 0 38%;color:var(--muted);font-size:14px}
+.rowbtn .rvv{flex:1;font-weight:600;min-width:0;overflow-wrap:anywhere}
+.rowbtn .rvv.needed{color:var(--bad)}
+.rowbtn .chev{flex:none;color:var(--tide);font-weight:600;font-size:14px}
+dl.sentlist{margin:10px 0 18px}
+dl.sentlist h3{font-family:var(--serif);font-size:19px;margin:18px 0 4px}
+dl.sentlist div{display:flex;gap:12px;padding:8px 0;border-bottom:1px solid var(--line)}
+dl.sentlist dt{flex:0 0 40%;color:var(--muted);font-size:14px}
+dl.sentlist dd{flex:1;margin:0;font-weight:600;overflow-wrap:anywhere}
 </style>
 </head>
 <body>
@@ -171,7 +191,10 @@ ul.miss .btn{min-height:42px;padding:0 18px;flex:none}
 </div>
 
 <script>
-/* ===== DATA (copied from the advisor tool, so answers load into it unchanged) ===== */
+/* ===== SHARED CONTENT =====
+   Every page (advisor tool, desktop questionnaire, phone app) is built from this file.
+   Change a question, option, range or note here and rebuild: npm run build */
+
 /* Original questionnaire, written for this tool. Not independently validated. */
 const QUESTIONNAIRE_VERSION = 'original-v2';
 const FIVE = ['A great deal','Quite a bit','Somewhat','Very little','Not at all'];
@@ -184,7 +207,8 @@ const TOL_Q = [
    opts:['A few weeks','About three months','About a year','Two to three years','More than three years, or I would not change course']},
   /* Loss-limit options are set from the model sheet: worst declines run 12-19% (tiers 1-2), 27-34% (3-4), 36-44% (5) and 63-81% (6). */
   {dim:'inv', q:'What is the largest drop from its peak value, over any period, that your portfolio could suffer before you would change your plan?',
-   opts:['20% or less','Up to 35%','Up to 45%','Up to 65%','More than 65%'], limits:[20,35,45,65,65], openLabel:'more than 65%'},
+   opts:['20% or less','Up to 35%','Up to 45%','Up to 65%','More than 65%'], limits:[20,35,45,65,65], openLabel:'more than 65%',
+   why:'This tells your advisor how large a fall you could live through without changing your plan. It is not a prediction of what will happen.'},
   {dim:'comfort', q:'In past market declines, what did you do?',
    opts:['Sold most of my investments','Sold some of my investments','I have not invested through a decline','Held my investments','Bought more']},
   {dim:'comfort', q:'How much do headlines about falling markets affect your mood or sleep?', opts:FIVE},
@@ -210,53 +234,159 @@ const TOL_PAIRS = [
 ];
 const tolWord = v => v<=2?'low':v===3?'moderate':'high';
 
-const CAP_FIELDS = [
-  {k:'horizon',   label:'Years until a large share is needed', hint:'Time until the client expects to start drawing down this money.', type:'number', step:'1'},
-  {k:'income',    label:'Income stability', type:'select', opts:[['5','Stable, covers all spending'],['4','Mostly stable, covers most spending'],['3','Variable, covers essentials'],['2','Unstable, covers little'],['1','None, relying on the portfolio']]},
-  {k:'emergency', label:'Emergency reserves, in months', hint:'Cash outside this portfolio, in months of spending.', type:'number', step:'0.5'},
-  {k:'withdrawal',label:'Planned withdrawals, % per year', hint:'Over the next five years. Enter 0 if none.', type:'number', step:'0.1'},
-  {k:'liquidity', label:'Large expenses within 5 years, % of portfolio', hint:'Home purchase, tuition, and similar. Enter 0 if none.', type:'number', step:'1'},
-  {k:'networth',  label:'Net worth excluding primary residence ($)', hint:'Optional. Used to size the portfolio against total wealth.', type:'number', step:'1000', optional:true},
-  {k:'debt',      label:'Debt burden', type:'select', opts:[['5','Low, easily manageable'],['3','Moderate'],['1','High, strains monthly cash flow']]},
-  {k:'dependents',label:'Financial dependents', type:'number', step:'1'}
+/* ----- record format ----- */
+const RECORD_SCHEMA = 'client-risk-profile/1';
+const BAND_SCALE = 6;
+
+/* ----- firm and privacy wording -----
+   The consent screen is built from these values. While approvedBy is empty the screen carries a visible
+   "draft" banner, so wording that compliance has not approved cannot go out looking final. */
+const PRIVACY = {
+  version: 'draft-1',
+  firm: 'GB Asset Management',
+  retention: '',     /* how long answers are kept after they are sent. Compliance fills this in. */
+  contact: '',       /* where a client sends questions about their information, such as an email address */
+  approvedBy: ''     /* compliance reviewer and date, for example 'J. Smith, 2026-12-01'. Leave empty while the wording is a draft. */
+};
+function privacyBlocks(){
+  const firm=PRIVACY.firm;
+  return [
+    {title:'What we collect', text:'Your answers to this questionnaire: details about you and your household, your finances and investments, and how you feel about investment risk.'},
+    {title:'Who sees it', text:'Your advisor at '+firm+' and the people at '+firm+' who help your advisor.'},
+    {title:'How it is stored and sent', text:'While you fill this in, your progress is saved on this device only. When you finish, you send your answers to your advisor yourself. Nothing is sent before then.'},
+    {title:'How long we keep it', text:PRIVACY.retention||'[How long '+firm+' keeps your answers will be set by its compliance team.]'},
+    {title:'Your choices', text:'You can delete your answers from this device at any time. '+(PRIVACY.contact?'To ask about your information after you have sent it, contact '+PRIVACY.contact+'.':'[The contact for questions about your information will be added by '+firm+'.]')}
+  ];
+}
+const CONSENT_LABEL = 'I have read this and I agree to share my answers with my advisor.';
+const makeConsent = (now=new Date()) => ({version:PRIVACY.version, acceptedAt:now.toISOString(), approved:!!PRIVACY.approvedBy});
+
+/* ----- "why we ask" notes ----- */
+const WHY = {
+  income:'Your income helps your advisor judge how steady your plans are and how much you could add to your savings. A range is enough.',
+  debtTotal:'Debt payments reduce what you have left to invest and affect how much risk makes sense. A range is enough.',
+  tax:'Your tax bracket affects which accounts and investments may suit you. We estimate it from your income range, and your advisor will confirm it.',
+  networth:'Your net worth shows how large your investments are compared with everything you own, which affects how much risk you can take. It is optional.',
+  horizon:'Money you need soon should take less risk than money you will not touch for many years.',
+  emergency:'Savings set aside for emergencies mean you will not have to sell investments at a bad time.',
+  withdrawal:'If you plan to take money out regularly, early losses can hurt more, so this affects how much risk makes sense.',
+  liquidity:'Big costs coming soon, such as a home purchase or tuition, should not depend on the stock market.',
+  dependents:'People who rely on you financially make steady, safer choices more important.',
+  homeOwn:'Your home is often your largest asset and a major cost, so it shapes your overall picture.',
+  homeValue:'This helps your advisor see your whole financial picture. An estimate is fine.',
+  retireAge:'The age you stop working changes how long your money has to last and to grow.',
+  guaranteed:'Income such as Social Security or a pension can cover everyday costs, which changes how much risk the rest of your money can take.',
+  workPlan:'A workplace plan is often a large part of your savings, so your advisor looks at it together with the rest.',
+  holdTotal:'We use the total to turn your percentages into dollar amounts. An estimate is fine.'
+};
+
+/* ----- ranges that replace exact dollar figures ----- */
+const INCOME_RANGES = [
+  {label:'Under $30,000',lo:0,hi:30000},
+  {label:'$30,000 to $60,000',lo:30000,hi:60000},
+  {label:'$60,000 to $100,000',lo:60000,hi:100000},
+  {label:'$100,000 to $150,000',lo:100000,hi:150000},
+  {label:'$150,000 to $250,000',lo:150000,hi:250000},
+  {label:'$250,000 to $500,000',lo:250000,hi:500000},
+  {label:'$500,000 to $1,000,000',lo:500000,hi:1000000},
+  {label:'More than $1,000,000',lo:1000000,hi:null},
+  {label:'Prefer not to say'}
 ];
-const INSURANCE=['Life','Disability','Health','Long-term care','Umbrella liability'];
-const PF=[
+const DEBT_RANGES = [
+  {label:'None',lo:0,hi:1},
+  {label:'Under $25,000',lo:1,hi:25000},
+  {label:'$25,000 to $100,000',lo:25000,hi:100000},
+  {label:'$100,000 to $250,000',lo:100000,hi:250000},
+  {label:'$250,000 to $500,000',lo:250000,hi:500000},
+  {label:'$500,000 or more',lo:500000,hi:null},
+  {label:'Prefer not to say'}
+];
+
+/* ----- U.S. federal income tax, tax year 2026 (IRS Rev. Proc. 2025-32) -----
+   Taxable income up to each limit is taxed at that rate. Update every year, and update the tests with it. */
+const TAX = {
+  year: 2026,
+  single:{ std:16100,  brackets:[[12400,10],[50400,12],[105700,22],[201775,24],[256225,32],[640600,35],[Infinity,37]] },
+  mfj:   { std:32200,  brackets:[[24800,10],[100800,12],[211400,22],[403550,24],[512450,32],[768700,35],[Infinity,37]] }
+};
+const TAX_OPTIONS = ['Up to 12%','22% to 24%','32% to 35%','37%','Not known'];
+
+/* ----- more profile choices ----- */
+const HOME_OWN = ['Own, with a mortgage','Own, no mortgage','Rent','Live with family or other'];
+const HOME_VALUE = ['Under $250,000','$250,000 to $500,000','$500,000 to $1,000,000','$1,000,000 to $2,000,000','More than $2,000,000','Not sure'];
+const RETIRE_AGE = ['Already retired','Before 60','60 to 64','65 to 67','68 to 70','After 70','Not sure'];
+const GUARANTEED = ['Yes, enough to cover most of my spending','Yes, but only part of my spending','No','Not sure'];
+const WORK_PLAN = ['Yes, and I take part','Yes, but I do not take part','No','Not applicable'];
+const ownsHome = v => /^Own/.test(String(v||''));
+
+/* ----- sliders: one table for every page -----
+   store says where the value lives ('cap' or 'profile'). hint is for clients, advisorHint for the advisor tool. */
+const SLIDERS = {
+  horizon:{key:'horizon',stepLabel:'One year',label:'Years until a large withdrawal might be needed',max:30,start:15,ticks:[0,5,10,15,20,25,30],last:'30+',
+    text:v=>v<=0?'Less than 1 year':v===1?'1 year':v>=30?'30 or more years':v+' years',
+    hint:'Drag the slider, or use the minus and plus buttons. Choose 0 if you may need it within a year.',
+    advisorHint:'Time until the client expects to start drawing down this money. Drag the slider or use the buttons. Choose 0 if the money may be needed within a year.'},
+  emergency:{key:'emergency',stepLabel:'One month',label:'Emergency reserves, in months',max:24,start:6,ticks:[0,6,12,18,24],last:'24+',
+    text:v=>v<=0?'None':v===1?'1 month':v>=24?'24 or more months':v+' months',
+    hint:'Cash outside this portfolio, in months of spending. Drag the slider, or use the minus and plus buttons. Choose 0 if you have none.',
+    advisorHint:'Cash outside this portfolio, in months of spending. Drag the slider or use the buttons. Choose 0 if there are none.'},
+  withdrawal:{key:'withdrawal',stepLabel:'Half a percent',label:'Planned withdrawals, % per year',max:12,step:0.5,start:3,ticks:[0,2,4,6,8,10,12],last:'12+',
+    text:v=>v<=0?'None':v>=12?'12% or more a year':v+'% a year',
+    hint:'Over the next five years. Drag the slider, or use the minus and plus buttons. Choose 0 if none.',
+    advisorHint:'Over the next five years. Drag the slider or use the buttons. Choose 0 if none.'},
+  liquidity:{key:'liquidity',stepLabel:'One percent',label:'Large expenses within 5 years, % of portfolio',max:50,start:10,ticks:[0,10,20,30,40,50],last:'50+',
+    text:v=>v<=0?'None':v>=50?'50% or more of your portfolio':v+'% of your portfolio',
+    hint:'Home purchase, tuition, and similar. Drag the slider, or use the minus and plus buttons. Choose 0 if none.',
+    advisorHint:'Home purchase, tuition, and similar. Drag the slider or use the buttons. Choose 0 if none.'},
+  dependents:{key:'dependents',stepLabel:'One person',label:'Financial dependents',max:8,start:1,ticks:[0,1,2,3,4,5,6,7,8],last:'8+',
+    text:v=>v<=0?'None':v===1?'1 person':v>=8?'8 or more people':v+' people',
+    hint:'People who rely on you financially. Drag the slider, or use the minus and plus buttons. Choose 0 if none.',
+    advisorHint:'People who rely on the client financially. Drag the slider or use the buttons. Choose 0 if none.'},
+  historyYears:{key:'historyYears',store:'profile',optional:true,stepLabel:'One year',label:'Years investing',max:40,start:10,ticks:[0,10,20,30,40],last:'40+',
+    text:v=>v<=0?'Less than 1 year':v===1?'1 year':v>=40?'40 or more years':v+' years',
+    hint:'Optional. Drag the slider, or use the minus and plus buttons. Leave it alone if you are not sure.',
+    advisorHint:'Drag the slider or use the buttons. Leave it alone if unknown.'}
+};
+
+const CAP_FIELDS = [
+  {k:'horizon',   label:SLIDERS.horizon.label,    type:'slider'},
+  {k:'income',    label:'Income stability', type:'select', opts:[['5','Stable, covers all spending'],['4','Mostly stable, covers most spending'],['3','Variable, covers essentials'],['2','Unstable, covers little'],['1','None, relying on the portfolio']]},
+  {k:'emergency', label:SLIDERS.emergency.label,  type:'slider'},
+  {k:'withdrawal',label:SLIDERS.withdrawal.label, type:'slider'},
+  {k:'liquidity', label:SLIDERS.liquidity.label,  type:'slider'},
+  {k:'networth',  label:'Net worth excluding primary residence ($)', hint:'Optional. Used to size the portfolio against total wealth.', type:'number', step:'1000', optional:true, money:true},
+  {k:'debt',      label:'Debt burden', type:'select', opts:[['5','Low, easily manageable'],['3','Moderate'],['1','High, strains monthly cash flow']]},
+  {k:'dependents',label:SLIDERS.dependents.label, type:'slider'}
+];
+const INSURANCE = ['Life','Disability','Health','Long-term care','Umbrella liability'];
+const HIST_OPTIONS = ['Stocks','Bonds','ETFs','Real Estate','Gold','Alternative Assets','Private Equity'], HIST_NONE = 'None of these';
+const GOAL_OPTIONS = ['Retirement','College tuition','Buying a home','Emergency savings','Growing my wealth','Generating income','Leaving an inheritance','Starting or buying a business','Paying off debt','Travel or a large purchase','Giving to charity'];
+
+/* Profile fields. type: number, select, text, textarea, slider (see SLIDERS), choices (tick boxes), note (belongs to the field above it). */
+const PF = [
   {k:'age',label:'Age',type:'number',step:'1'},
   {k:'marital',label:'Marital status',type:'select',opts:['Single','Married or partnered','Divorced','Widowed']},
   {k:'employment',label:'Employment',type:'select',opts:['Employed','Self-employed','Retired','Not working','Other']},
-  {k:'income',label:'Annual household income ($)',type:'number',step:'1000',money:true},
-  {k:'debtTotal',label:'Total debt ($)',hint:'Mortgage, loans and cards. Optional.',type:'number',step:'1000',money:true},
-  {k:'tax',label:'Federal marginal tax bracket',type:'select',opts:['Up to 12%','22% to 24%','32% to 35%','37%','Not known']},
+  {k:'income',label:'Annual household income',hint:'Before tax. Choose the range that fits.',type:'select',opts:INCOME_RANGES.map(r=>r.label)},
+  {k:'homeOwn',label:'Do you own your home?',type:'select',opts:HOME_OWN},
+  {k:'homeValue',label:'Approximate value of your home',hint:'Only if you own it. An estimate is fine.',type:'select',opts:HOME_VALUE,showIf:p=>ownsHome(p.homeOwn)},
+  {k:'retireAge',label:'Age you expect to retire',type:'select',opts:RETIRE_AGE},
+  {k:'guaranteed',label:'Guaranteed income in retirement',hint:'For example Social Security or a pension.',type:'select',opts:GUARANTEED},
+  {k:'workPlan',label:'Workplace retirement plan',hint:'For example a 401(k) through an employer.',type:'select',opts:WORK_PLAN},
+  {k:'debtTotal',label:'Total debt',hint:'Mortgage, loans and cards. Choose the range that fits.',type:'select',opts:DEBT_RANGES.map(r=>r.label)},
+  {k:'tax',label:'Federal marginal tax bracket',type:'select',opts:TAX_OPTIONS},
   {k:'otherAssets',label:'Assets held elsewhere ($)',hint:'Outside this portfolio, excluding the home. Optional.',type:'number',step:'1000',money:true},
   {k:'otherAssetsNote',label:'Where those assets are held',type:'text'},
-  {k:'historyYears',label:'Years investing',type:'number',step:'1'},
-  {k:'history',label:'Investment history notes',hint:'Products used and how the client acted in past declines.',type:'text'},
+  {k:'historyYears',label:SLIDERS.historyYears.label,type:'slider'},
+  {k:'history',label:'Investment history',type:'choices'},
   {k:'goals',label:'Financial goals',type:'choices'},
   {k:'goalsNote',label:'Goal details',type:'note'},
   {k:'restrictions',label:'Restrictions and special circumstances',hint:'Values-based limits, employer stock, health, other.',type:'textarea',wide:true}
 ];
-const blankProfile = () => ({age:'',marital:'',employment:'',income:'',debtTotal:'',tax:'',otherAssets:'',otherAssetsNote:'',historyYears:'',history:'',goals:'',goalsNote:'',restrictions:'',insurance:[],noInsurance:false});
+const blankProfile = () => { const p={}; PF.forEach(f=>{ p[f.k]=''; }); p.insurance=[]; p.noInsurance=false; return p; };
 
-/* ===== STATE, STEPS, RULES ===== */
-const isoDate = (dt=new Date()) => dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0');
-const freshState = () => ({
-  name:'', advisor:'', tol:Array(TOL_Q.length).fill(null),
-  cap:{horizon:'',income:'',emergency:'',withdrawal:'',liquidity:'',networth:'',debt:'',dependents:''},
-  profile:blankProfile(),
-  hold:Array(12).fill(''), maxPos:'', holdTotal:''
-});
-const state = freshState();
-const CAP_REQ=['horizon','income','emergency','withdrawal','liquidity','debt','dependents'];
-const capValid = v => v!=='' && v!=null && Number.isFinite(Number(v)) && Number(v)>=0;
-const PROFILE_GROUPS=[
-  {title:'You and your household', keys:['age','marital','employment','income']},
-  {title:'Debt and other assets', keys:['debtTotal','tax','otherAssets','otherAssetsNote']},
-  {title:'Your investing history', keys:['historyYears','history']},
-  {title:'Goals and special circumstances', keys:['goals','restrictions']}
-];
-const CAP_GROUPS=[['horizon','income','emergency'],['withdrawal','liquidity','networth'],['debt','dependents']];
-/* cls is the asset class number used by the advisor tool. tool is that class name there; a test checks the two match. */
+/* ----- current investments, entered as percentages -----
+   cls is the asset class number used by the advisor tool. tool is that class name there; a test checks the two match. */
 const HOLD_CLASSES=[
   {cls:0, tool:'US large-cap equity',       label:'US large company stocks',               hint:'S&P 500 funds, total US stock funds, blue-chip stocks you own through funds'},
   {cls:1, tool:'US small-cap equity',       label:'US small company stocks',               hint:'Small-company stock funds'},
@@ -275,49 +405,79 @@ const HOLD_GROUPS=[
   {title:'Stocks and real estate you own', part:'1 of 2', keys:[0,1,2,3,4,5]},
   {title:'Bonds, cash and other', part:'2 of 2', keys:[6,7,8,9,10,11], maxPos:true}
 ];
-const steps=[{t:'welcome'},{t:'you'}];
-PROFILE_GROUPS.forEach(g=>steps.push({t:'profile',title:g.title,keys:g.keys}));
-steps.push({t:'ins'});
-const CAP_TITLES=['Time, Income and Savings','Upcoming spending and net worth','Debt and dependents'];
-CAP_GROUPS.forEach((g,i)=>steps.push({t:'cap',title:CAP_TITLES[i],part:(i+1)+' of '+CAP_GROUPS.length,keys:g}));
-HOLD_GROUPS.forEach(g=>steps.push({t:'hold',title:g.title,part:g.part,keys:g.keys,maxPos:!!g.maxPos}));
-TOL_Q.forEach((q,i)=>steps.push({t:'q',i}));
-steps.push({t:'review'},{t:'finish'});
-const SECTION_OF={welcome:-1,you:0,profile:1,ins:1,cap:2,hold:3,q:4,review:5,finish:5};
-const SECTIONS=[
-  {name:'About you', desc:'Your name and your advisor.'},
-  {name:'Your situation', desc:'Household, work, goals and insurance. Optional.'},
-  {name:'Your finances', desc:'Time horizon, income and savings.'},
-  {name:'Your investments', desc:'What you hold today. Optional.'},
-  {name:'Risk questions', desc:TOL_Q.length+' short questions about how you feel about loss.'},
-  {name:'Review and send', desc:'Check your answers, then send them to your advisor.'}
-];
-SECTIONS.forEach((x,i)=>{ x.start=steps.findIndex(s=>SECTION_OF[s.t]===i); });
-const IDX={hold:steps.findIndex(s=>s.t==='hold'), you:1, cap:steps.findIndex(s=>s.t==='cap'), q:steps.findIndex(s=>s.t==='q'), review:steps.findIndex(s=>s.t==='review')};
 
-function progress(st){
-  const tolDone=st.tol.filter(v=>v!=null).length;
-  const capDone=CAP_REQ.filter(k=>capValid(st.cap[k])).length;
-  const missing=[];
-  if(!st.name.trim()) missing.push({label:'Your name', go:IDX.you});
-  if(capDone<CAP_REQ.length) missing.push({label:(CAP_REQ.length-capDone)+' required '+(CAP_REQ.length-capDone===1?'field':'fields')+' in Your finances', go:IDX.cap});
-  if(tolDone<TOL_Q.length){ const first=st.tol.findIndex(v=>v==null); missing.push({label:(TOL_Q.length-tolDone)+' '+(TOL_Q.length-tolDone===1?'question':'questions')+' about risk', go:IDX.q+first}); }
-  /* Investments are entered as percentages. If any are entered they must add up to 100, and a total value is needed to turn them into dollars. */
-  const pcts=HOLD_CLASSES.map((c,i)=>Number(st.hold[i])>0?Number(st.hold[i]):0);
-  const holdPct=Math.round(pcts.reduce((a,b)=>a+b,0)*100)/100, holdCount=pcts.filter(v=>v>0).length, holdValue=Number(st.holdTotal)>0?Number(st.holdTotal):0;
-  const holdIssue = holdCount===0 ? null : Math.abs(holdPct-100)>0.01 ? 'pct' : !holdValue ? 'total' : null;
-  if(holdIssue==='pct') missing.push({label:'Your investments add up to '+holdPct+'%, not 100%', go:IDX.hold});
-  if(holdIssue==='total') missing.push({label:'Your investments: add the approximate total value', go:IDX.hold});
-  return {tolDone,capDone,missing,complete:missing.length===0,holdCount,holdPct,holdValue,holdIssue};
+/* ===== SHARED LOGIC (no page code in here, so it can be tested on its own) ===== */
+const CAP_REQ = ['horizon','income','emergency','withdrawal','liquidity','debt','dependents'];
+const capValid = v => v!=='' && v!=null && Number.isFinite(Number(v)) && Number(v)>=0;
+const isoDate = (dt=new Date()) => dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0');
+const usd = v => (v<0?'\u2212':'')+'$'+Math.abs(Math.round(v)).toLocaleString('en-US');
+async function sha256(str){
+  try{
+    if(!(typeof window!=='undefined' && window.crypto && crypto.subtle)) return null;
+    const buf=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(str));
+    return [...new Uint8Array(buf)].map(b=>b.toString(16).padStart(2,'0')).join('');
+  }catch(e){ return null; }
 }
-/* What is still missing on one screen. Returns a list of keys. */
-function stepMissing(s){
-  if(s.t==='you') return state.name.trim()?[]:['name'];
-  if(s.t==='cap') return s.keys.filter(k=>CAP_REQ.includes(k)&&!capValid(state.cap[k]));
-  if(s.t==='q') return state.tol[s.i]==null?['q']:[];
-  if(s.t==='hold'&&s.maxPos) return progress(state).holdIssue?['hold']:[];
-  if(s.t==='review') return progress(state).complete?[]:['review'];
-  return [];
+
+/* ----- income and debt ranges ----- */
+function rangeLabelFor(list, v){
+  if(v===''||v==null) return '';
+  if(list.some(r=>r.label===v)) return String(v);
+  const n=Number(String(v).replace(/[$,\s]/g,''));
+  if(!Number.isFinite(n)||n<0) return String(v);
+  const r=list.find(r=>r.lo!=null && n>=r.lo && (r.hi==null||n<r.hi));
+  return r?r.label:String(v);
+}
+/* Records saved before ranges existed hold dollar figures. These turn them into the matching range. */
+const incomeRangeFor = v => rangeLabelFor(INCOME_RANGES,v);
+const debtRangeFor = v => rangeLabelFor(DEBT_RANGES,v);
+
+/* ----- federal tax bracket estimate ----- */
+function bucketOfRate(rate){ return rate<=12?'Up to 12%':rate<=24?'22% to 24%':rate<=35?'32% to 35%':'37%'; }
+function rateFor(taxable, brackets){ for(const [limit,rate] of brackets){ if(taxable<=limit) return rate; } return brackets[brackets.length-1][1]; }
+/* Taxable income is estimated as the income minus the standard deduction. Married couples are treated as filing jointly,
+   everyone else as single. Returns null when there is no income range to work from. */
+function estimateTaxBracket(incomeLabel, marital){
+  const r=INCOME_RANGES.find(x=>x.label===incomeLabel);
+  if(!r||r.lo==null) return null;
+  const joint = marital==='Married or partnered', t = joint?TAX.mfj:TAX.single;
+  const at = gross => bucketOfRate(rateFor(Math.max(0,gross-t.std),t.brackets));
+  const top = r.hi==null?r.lo:r.hi, mid=(r.lo+top)/2;
+  const lowB=at(r.lo), highB=at(top);
+  return {bucket:at(mid), borderline:lowB!==highB, range:[lowB,highB], filing:joint?'married filing jointly':'single', year:TAX.year};
+}
+/* Fill the tax bracket from the estimate unless the person has chosen their own. st needs profile and taxAuto. */
+function applyTaxEstimate(st){
+  const est=estimateTaxBracket(st.profile.income, st.profile.marital);
+  if(!est) return {est:null,changed:false};
+  if(st.profile.tax===''||st.profile.tax===st.taxAuto){
+    const changed=st.profile.tax!==est.bucket;
+    st.profile.tax=est.bucket; st.taxAuto=est.bucket;
+    return {est,changed};
+  }
+  return {est,changed:false};
+}
+function taxNote(est){
+  if(!est) return '';
+  let t='Estimated from your income range using the '+est.year+' U.S. federal brackets, as '+est.filing+'.';
+  if(est.borderline) t+=' Your range could fall in "'+est.range[0]+'" or "'+est.range[1]+'". We picked the one for the middle of your range.';
+  return t+' Change it if you know yours. Your advisor will confirm.';
+}
+
+/* ----- client answers: state, progress and the saved record ----- */
+const freshState = () => ({
+  name:'', advisor:'', tol:Array(TOL_Q.length).fill(null),
+  cap:{horizon:'',income:'',emergency:'',withdrawal:'',liquidity:'',networth:'',debt:'',dependents:''},
+  profile:blankProfile(),
+  hold:Array(HOLD_CLASSES.length).fill(''), maxPos:'', holdTotal:'',
+  consent:null, taxAuto:''
+});
+/* Investments are entered as percentages. If any are entered they must add up to 100, and a total value is needed to turn them into dollars. */
+function holdSummary(st){
+  const pcts=HOLD_CLASSES.map((c,i)=>Number(st.hold[i])>0?Number(st.hold[i]):0);
+  const pct=Math.round(pcts.reduce((a,b)=>a+b,0)*100)/100, count=pcts.filter(v=>v>0).length, value=Number(st.holdTotal)>0?Number(st.holdTotal):0;
+  const issue = count===0 ? null : Math.abs(pct-100)>0.01 ? 'pct' : !value ? 'total' : null;
+  return {pct,count,value,issue};
 }
 /* Turn the percentages and the total value into dollar amounts per asset class, the way the advisor tool stores them. */
 function holdingsFrom(st){
@@ -327,15 +487,30 @@ function holdingsFrom(st){
   const sum=rows.reduce((a,r)=>a+r.pct,0);
   return rows.map(r=>({cls:r.cls,amt:String(Math.round(total*r.pct/sum))}));
 }
+/* What is still missing before the answers can be sent. where says which part of the questionnaire to open. */
+function progress(st){
+  const tolDone=st.tol.filter(v=>v!=null).length;
+  const capDone=CAP_REQ.filter(k=>capValid(st.cap[k])).length;
+  const missing=[];
+  if(!st.consent) missing.push({label:'Your agreement to share your answers', where:'consent'});
+  if(!st.name.trim()) missing.push({label:'Your name', where:'name'});
+  if(capDone<CAP_REQ.length){ const n=CAP_REQ.length-capDone; missing.push({label:n+' required '+(n===1?'field':'fields')+' in Your finances', where:'cap'}); }
+  if(tolDone<TOL_Q.length){ const n=TOL_Q.length-tolDone; missing.push({label:n+' '+(n===1?'question':'questions')+' about risk', where:'q', index:st.tol.findIndex(v=>v==null)}); }
+  const hs=holdSummary(st);
+  if(hs.issue==='pct') missing.push({label:'Your investments add up to '+hs.pct+'%, not 100%', where:'hold'});
+  if(hs.issue==='total') missing.push({label:'Your investments: add the approximate total value', where:'hold'});
+  return {tolDone,capDone,missing,complete:missing.length===0,holdCount:hs.count,holdPct:hs.pct,holdValue:hs.value,holdIssue:hs.issue};
+}
 function buildRecord(st){
   return {
-    schema:'client-risk-profile/1',
-    bandScale:6,
+    schema:RECORD_SCHEMA,
+    bandScale:BAND_SCALE,
     questionnaireVersion:QUESTIONNAIRE_VERSION,
     source:'client-questionnaire',
     exportedAt:new Date().toISOString(),
     previousRecordHash:null,
     client:{name:st.name.trim(),advisor:st.advisor.trim()},
+    consent:st.consent||null,
     profile:st.profile,
     review:{},
     inputs:{
@@ -348,42 +523,176 @@ function buildRecord(st){
     register:[], riskSeq:0
   };
 }
-/* ===== DRAFT (saved on this device only, deleted after 7 days or on request) ===== */
-const DRAFT_KEY='investor-qq-draft-v1', DRAFT_MS=7*24*3600*1000;
-function loadDraft(){
-  try{
-    const raw=localStorage.getItem(DRAFT_KEY); if(!raw) return null;
-    const d=JSON.parse(raw);
-    if(!d||!d.state||Date.now()-d.savedAt>DRAFT_MS){ localStorage.removeItem(DRAFT_KEY); return null; }
-    return d;
-  }catch(e){ return null; }
-}
-function saveDraft(step){ try{ localStorage.setItem(DRAFT_KEY,JSON.stringify({savedAt:Date.now(),step,ver:2,state})); }catch(e){} }
-function clearDraft(){ try{ localStorage.removeItem(DRAFT_KEY); }catch(e){} }
-function applyDraft(d){
-  const f=freshState(), s=d.state||{};
-  state.name=String(s.name||''); state.advisor=String(s.advisor||'');
-  state.tol=TOL_Q.map((q,i)=>{ const v=Number((s.tol||[])[i]); return v>=1&&v<=q.opts.length?v:null; });
-  Object.keys(f.cap).forEach(k=>{ state.cap[k]=String((s.cap||{})[k]==null?'':s.cap[k]); });
-  const P=s.profile||{};
-  Object.keys(f.profile).forEach(k=>{ if(k!=='insurance'&&k!=='noInsurance') state.profile[k]=String(P[k]==null?'':P[k]); });
-  state.profile.insurance=Array.isArray(P.insurance)?P.insurance.filter(x=>INSURANCE.includes(x)):[];
-  state.profile.noInsurance=!!P.noInsurance;
-  /* Drafts saved before version 2 held dollar amounts here, so they are not reused as percentages. */
-  const keep=d.ver===2;
-  state.hold=HOLD_CLASSES.map((c,i)=>keep?String((s.hold||[])[i]==null?'':s.hold[i]):'');
-  state.maxPos=keep?String(s.maxPos==null?'':s.maxPos):'';
-  state.holdTotal=keep?String(s.holdTotal==null?'':s.holdTotal):'';
-}
-function resetState(){ const f=freshState(); state.name=f.name; state.advisor=f.advisor; state.tol=f.tol; state.cap=f.cap; state.profile=f.profile; state.hold=f.hold; state.maxPos=f.maxPos; state.holdTotal=f.holdTotal; }
 
-/* ===== UI ===== */
-let stepIdx=0, showErrors=false, draft=null, focusEl=null;
-const isIos = ()=>{ if(typeof navigator==='undefined') return false; const ua=navigator.userAgent||''; return /iPad|iPhone|iPod/.test(ua)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1); };
-const isStandalone = ()=>{ if(typeof navigator==='undefined') return false; return navigator.standalone===true||!!(typeof window!=='undefined'&&window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches); };
-const app={};
-if(typeof document!=='undefined'){
-const $ = s=>document.querySelector(s);
+/* ----- a plain-language description of a record: the review screen, the confirmation and the PDF all use this ----- */
+function describeProfileValue(k,v){
+  const f=PF.find(x=>x.k===k);
+  if(v===''||v==null) return '';
+  if(f&&f.type==='slider') return SLIDERS[k].text(Math.min(SLIDERS[k].max,Number(v)));
+  if(f&&f.money) return usd(Number(v));
+  return String(v);
+}
+function describeCapValue(f,v){
+  if(v===''||v==null) return '';
+  if(f.type==='slider') return SLIDERS[f.k].text(Math.min(SLIDERS[f.k].max,Number(v)));
+  if(f.type==='select'){ const o=f.opts.find(x=>x[0]===String(v)); return o?o[1]:String(v); }
+  if(f.money) return usd(Number(v));
+  return String(v);
+}
+function describeAnswers(rec){
+  const P=rec.profile||{}, I=rec.inputs||{}, C=I.capacity||{}, T=I.tolerance||[], H=I.holdings||[];
+  const row=(key,label,value,extra)=>Object.assign({key,label,value:value==null?'':String(value)},extra||{});
+  const sections=[];
+  sections.push({id:'you',title:'About you',rows:[
+    row('name','Name',(rec.client&&rec.client.name)||'',{required:true}),
+    row('advisor','Your advisor',(rec.client&&rec.client.advisor)||'')]});
+  const sit=[];
+  PF.forEach(f=>{
+    if(f.type==='note') return;
+    if(f.showIf && !f.showIf(P)) return;
+    if(f.type==='choices'){
+      const v=String(P[f.k]||''), note=f.k==='goals'?String(P.goalsNote||''):'';
+      sit.push(row('pf:'+f.k,f.label,v+(v&&note?' ('+note+')':(!v&&note?note:''))));
+    } else sit.push(row('pf:'+f.k,f.label,describeProfileValue(f.k,P[f.k])));
+  });
+  sit.push(row('ins','Insurance',P.noInsurance?'None of the listed types':(P.insurance||[]).join(', ')));
+  sections.push({id:'situation',title:'Your situation',rows:sit});
+  sections.push({id:'finances',title:'Your finances',rows:CAP_FIELDS.map(f=>row('cap:'+f.k,f.label.replace(/ \(\$\)$/,''),describeCapValue(f,C[f.k]),{required:CAP_REQ.includes(f.k)}))});
+  const inv=[];
+  if(H.length){
+    const total=H.reduce((a,x)=>a+Number(x.amt),0);
+    H.forEach(x=>{ const c=HOLD_CLASSES.find(y=>y.cls===x.cls); const pct=total?Math.round(Number(x.amt)/total*1000)/10:0; inv.push(row('hold',c?c.label:'Class '+x.cls,pct+'% (about '+usd(Number(x.amt))+')')); });
+    inv.push(row('hold','Total value of these investments','about '+usd(total)));
+    if(I.largestSecurityPct) inv.push(row('hold','Largest single holding',I.largestSecurityPct+'% of your investments'));
+  } else inv.push(row('hold','Investments','Not entered. Your advisor will add them from your statements.'));
+  sections.push({id:'investments',title:'Your investments',rows:inv});
+  sections.push({id:'risk',title:'How you feel about risk',rows:TOL_Q.map((q,i)=>row('q:'+i,'Question '+(i+1),(T[i]&&T[i].answer)||'',{required:true,qtext:q.q}))});
+  return sections;
+}
+function pdfDocFor(rec, now){
+  now = now||new Date();
+  const when=now.toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'});
+  const name=(rec.client&&rec.client.name)||'', adv=(rec.client&&rec.client.advisor)||'';
+  const lines=['Prepared for '+(name||'you')+' on '+when+'.'];
+  if(adv) lines.push('Your advisor: '+adv+' at '+PRIVACY.firm+'.'); else lines.push('Shared with '+PRIVACY.firm+'.');
+  if(rec.consent&&rec.consent.acceptedAt) lines.push('You agreed to share these answers on '+new Date(rec.consent.acceptedAt).toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'})+'.');
+  return {
+    title:'Your investor questionnaire',
+    lines,
+    sections:describeAnswers(rec).filter(s=>s.id!=='you').map(s=>({title:s.title,rows:s.rows.map(r=>[r.qtext||r.label,r.value])})),
+    footer:'A copy of the answers you sent to your advisor. It contains no scores or recommendations.',
+    info:{title:'Your investor questionnaire',author:PRIVACY.firm}
+  };
+}
+const answersFileName = (rec,ext) => 'investor-questionnaire-'+(((rec.client&&rec.client.name)||'client').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')||'client')+'-'+isoDate()+'.'+ext;
+
+/* ===== PDF WRITER =====
+   A small, dependency-free writer for a text-only PDF (Letter size, standard Helvetica fonts).
+   Used for the copy of their answers that a client keeps. It never contains scores or recommendations. */
+const PDF_WIDTHS = {
+  regular: [278, 278, 355, 556, 556, 889, 667, 191, 333, 333, 389, 584, 278, 333, 278, 278, 556, 556, 556, 556, 556, 556, 556, 556, 556, 556, 278, 278, 584, 584, 584, 556, 1015, 667, 667, 722, 722, 667, 611, 778, 722, 278, 500, 667, 556, 833, 722, 778, 667, 778, 722, 667, 611, 722, 667, 944, 667, 667, 611, 278, 278, 278, 469, 556, 333, 556, 556, 500, 556, 556, 278, 556, 556, 222, 222, 500, 222, 833, 556, 556, 556, 556, 333, 500, 278, 556, 500, 722, 500, 500, 500, 334, 260, 334, 584, 761, 556, 556, 222, 556, 333, 1000, 556, 556, 333, 1000, 667, 333, 1000, 556, 611, 556, 556, 222, 222, 333, 333, 350, 556, 1000, 333, 1000, 500, 333, 944, 556, 500, 667, 278, 333, 556, 556, 556, 556, 260, 556, 333, 737, 370, 556, 584, 333, 737, 333, 400, 584, 333, 333, 333, 556, 537, 278, 333, 333, 365, 556, 834, 834, 834, 611, 667, 667, 667, 667, 667, 667, 1000, 722, 667, 667, 667, 667, 278, 278, 278, 278, 722, 722, 778, 778, 778, 778, 778, 584, 778, 722, 722, 722, 722, 667, 667, 611, 556, 556, 556, 556, 556, 556, 889, 500, 556, 556, 556, 556, 278, 278, 278, 278, 556, 556, 556, 556, 556, 556, 556, 584, 611, 556, 556, 556, 556, 500, 556, 500],
+  bold: [278, 333, 474, 556, 556, 889, 722, 238, 333, 333, 389, 584, 278, 333, 278, 278, 556, 556, 556, 556, 556, 556, 556, 556, 556, 556, 333, 333, 584, 584, 584, 611, 975, 722, 722, 722, 722, 667, 611, 778, 722, 278, 556, 722, 611, 833, 722, 778, 667, 778, 722, 667, 611, 722, 667, 944, 667, 667, 611, 333, 278, 333, 584, 556, 333, 556, 611, 556, 611, 556, 333, 611, 611, 278, 278, 556, 278, 889, 611, 611, 611, 611, 389, 556, 333, 611, 556, 778, 556, 556, 500, 389, 280, 389, 584, 761, 556, 611, 278, 556, 500, 1000, 556, 556, 333, 1000, 667, 333, 1000, 611, 611, 611, 611, 278, 278, 500, 500, 350, 556, 1000, 333, 1000, 556, 333, 944, 611, 500, 667, 278, 333, 556, 556, 556, 556, 280, 556, 333, 737, 370, 556, 584, 333, 737, 333, 400, 584, 333, 333, 333, 611, 556, 278, 333, 333, 365, 556, 834, 834, 834, 611, 722, 722, 722, 722, 722, 722, 1000, 722, 667, 667, 667, 667, 278, 278, 278, 278, 722, 722, 778, 778, 778, 778, 778, 584, 778, 722, 722, 722, 722, 667, 667, 611, 556, 556, 556, 556, 556, 556, 889, 556, 556, 556, 556, 556, 278, 278, 278, 278, 611, 611, 611, 611, 611, 611, 611, 584, 611, 611, 611, 611, 611, 556, 611, 556]
+};
+/* Characters outside plain ASCII that the standard fonts can show, as WinAnsi codes. */
+const PDF_WINANSI = {'\u2018':0x91,'\u2019':0x92,'\u201C':0x93,'\u201D':0x94,'\u2013':0x96,'\u2014':0x97,'\u2026':0x85,'\u2022':0x95,'\u2212':0x2D,'\u00A0':0x20,'\u20AC':0x80};
+function pdfCode(ch){
+  const c=ch.charCodeAt(0);
+  if(PDF_WINANSI[ch]!==undefined) return PDF_WINANSI[ch];
+  if(c>=32&&c<=126) return c;
+  if(c>=160&&c<=255) return c;
+  return 63;
+}
+function pdfWidth(text,size,bold){
+  const w=bold?PDF_WIDTHS.bold:PDF_WIDTHS.regular; let t=0;
+  for(const ch of String(text)){ const code=pdfCode(ch); t+=(w[code-32]!==undefined?w[code-32]:556); }
+  return t*size/1000;
+}
+function pdfEscape(text){
+  let out='';
+  for(const ch of String(text)){
+    const s=String.fromCharCode(pdfCode(ch));
+    out+= (s==='('||s===')'||s==='\\') ? '\\'+s : s;
+  }
+  return out;
+}
+function pdfWrap(text,size,bold,maxWidth){
+  const lines=[];
+  String(text).split(/\n/).forEach(par=>{
+    const words=par.split(/\s+/).filter(Boolean); let cur='';
+    if(!words.length){ lines.push(''); return; }
+    words.forEach(w=>{
+      /* a single word wider than the line is cut */
+      while(pdfWidth(w,size,bold)>maxWidth){
+        let n=w.length; while(n>1&&pdfWidth(w.slice(0,n),size,bold)>maxWidth) n--;
+        if(cur){ lines.push(cur); cur=''; }
+        lines.push(w.slice(0,n)); w=w.slice(n);
+      }
+      const trial=cur?cur+' '+w:w;
+      if(pdfWidth(trial,size,bold)<=maxWidth) cur=trial; else { if(cur) lines.push(cur); cur=w; }
+    });
+    if(cur) lines.push(cur);
+  });
+  return lines;
+}
+/* doc: {title, lines:[strings under the title], sections:[{title, rows:[[label,value]]}], footer, info:{title,author}}
+   Returns the PDF as a Uint8Array. */
+function buildPdf(doc){
+  const W=612,H=792,M=54,TOP=H-62,BOTTOM=72,LABEL_W=170,GAP=14,VALUE_X=M+LABEL_W+GAP,VALUE_W=W-M-VALUE_X;
+  const pages=[[]]; let y=TOP;
+  const cur=()=>pages[pages.length-1];
+  const newPage=()=>{ pages.push([]); y=TOP; };
+  const need=hh=>{ if(y-hh<BOTTOM) newPage(); };
+  const text=(x,yy,str,size,bold)=>cur().push('BT /'+(bold?'F2':'F1')+' '+size+' Tf 1 0 0 1 '+x.toFixed(2)+' '+yy.toFixed(2)+' Tm ('+pdfEscape(str)+') Tj ET');
+  const rule=(yy,gray)=>cur().push((gray||0.8)+' G 0.6 w '+M+' '+yy.toFixed(2)+' m '+(W-M)+' '+yy.toFixed(2)+' l S');
+  text(M,y,doc.title,20,true); y-=26;
+  (doc.lines||[]).forEach(l=>{ pdfWrap(l,10.5,false,W-2*M).forEach(s=>{ need(15); text(M,y,s,10.5,false); y-=15; }); });
+  y-=6; rule(y); y-=20;
+  (doc.sections||[]).forEach(sec=>{
+    const rows=(sec.rows||[]).filter(r=>r[1]!==''&&r[1]!=null);
+    if(!rows.length) return;
+    need(60); text(M,y,sec.title,13,true); y-=8; rule(y,0.6); y-=16;
+    rows.forEach(r=>{
+      const L=pdfWrap(r[0],9.5,true,LABEL_W), V=pdfWrap(String(r[1]),10.5,false,VALUE_W), n=Math.max(L.length,V.length);
+      need(n*14+6);
+      for(let i=0;i<n;i++){ if(L[i]) text(M,y-i*14,L[i],9.5,true); if(V[i]) text(VALUE_X,y-i*14,V[i],10.5,false); }
+      y-=n*14+6;
+    });
+    y-=10;
+  });
+  const total=pages.length;
+  pages.forEach((p,i)=>{
+    p.push('BT /F1 8.5 Tf 1 0 0 1 '+M+' 40 Tm ('+pdfEscape(doc.footer||'')+') Tj ET');
+    const label='Page '+(i+1)+' of '+total;
+    p.push('BT /F1 8.5 Tf 1 0 0 1 '+(W-M-pdfWidth(label,8.5,false)).toFixed(2)+' 40 Tm ('+pdfEscape(label)+') Tj ET');
+  });
+  /* objects: 1 catalog, 2 pages, 3 regular font, 4 bold font, 5 info, then a content stream and a page for each page */
+  const objs=[]; const add=s=>{ objs.push(s); return objs.length; };
+  add('<< /Type /Catalog /Pages 2 0 R >>');
+  add('PAGES');
+  add('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>');
+  add('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>');
+  const info=doc.info||{};
+  add('<< /Title ('+pdfEscape(info.title||doc.title)+') /Author ('+pdfEscape(info.author||'')+') /Producer (Investor questionnaire) >>');
+  const kids=[];
+  pages.forEach(p=>{
+    const body=p.join('\n');
+    const contentId=add('<< /Length '+body.length+' >>\nstream\n'+body+'\nendstream');
+    const pageId=add('<< /Type /Page /Parent 2 0 R /MediaBox [0 0 '+W+' '+H+'] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents '+contentId+' 0 R >>');
+    kids.push(pageId+' 0 R');
+  });
+  objs[1]='<< /Type /Pages /Kids ['+kids.join(' ')+'] /Count '+kids.length+' >>';
+  let out='%PDF-1.4\n'; const offsets=[];
+  objs.forEach((o,i)=>{ offsets.push(out.length); out+=(i+1)+' 0 obj\n'+o+'\nendobj\n'; });
+  const xref=out.length;
+  out+='xref\n0 '+(objs.length+1)+'\n0000000000 65535 f \n'+offsets.map(o=>String(o).padStart(10,'0')+' 00000 n \n').join('');
+  out+='trailer\n<< /Size '+(objs.length+1)+' /Root 1 0 R /Info 5 0 R >>\nstartxref\n'+xref+'\n%%EOF\n';
+  const bytes=new Uint8Array(out.length); for(let i=0;i<out.length;i++) bytes[i]=out.charCodeAt(i)&255;
+  return bytes;
+}
+function pdfToBase64(bytes){ let s=''; for(let i=0;i<bytes.length;i+=8192) s+=String.fromCharCode.apply(null,bytes.subarray(i,i+8192)); return btoa(s); }
+
+/* ===== SHARED UI HELPERS ===== */
+const $ = (s,r=document)=>r.querySelector(s);
 function h(tag, attrs={}, ...kids){
   const e=document.createElement(tag);
   for(const [k,v] of Object.entries(attrs||{})){
@@ -394,6 +703,188 @@ function h(tag, attrs={}, ...kids){
   for(const c of kids.flat(Infinity)){ if(c==null||c===false) continue; e.append(c.nodeType?c:document.createTextNode(c)); }
   return e;
 }
+/* A short "Why we ask" note that opens when tapped. */
+function whyNote(text){ return h('details',{class:'why'},h('summary',{},'Why we ask'),h('p',{},text)); }
+
+/* One form field. o: {onChange(key,value), bad, why}. */
+function buildField(f, obj, prefix, o){
+  o=o||{};
+  const id=prefix+f.k, on=e=>{ obj[f.k]=e.target.value; if(o.onChange) o.onChange(f.k,e.target.value); };
+  let control;
+  if(f.type==='select'){
+    const opts=(f.opts||[]).map(x=>Array.isArray(x)?{v:x[0],t:x[1]}:{v:x,t:x});
+    control=h('select',{id,onchange:on},h('option',{value:''},'Select'),opts.map(x=>h('option',{value:x.v},x.t)));
+  } else if(f.type==='textarea') control=h('textarea',{id,oninput:on});
+  else control=h('input',{id,type:f.type||'text',step:f.step,min:f.type==='number'?'0':null,inputmode:f.type==='number'?'decimal':null,autocomplete:'off',oninput:on});
+  control.value = obj[f.k]==null ? '' : obj[f.k];
+  const why = o.why && WHY[f.k] ? whyNote(WHY[f.k]) : null;
+  return h('div',{class:'field'+(f.wide?' wide':'')+(o.bad?' bad':'')},h('label',{for:id},f.label),f.hint?h('span',{class:'hint'},f.hint):null,why,control,o.bad?h('p',{class:'err'},'Required'):null);
+}
+
+/* A slider with a large readout, minus and plus buttons and a number scale.
+   cfg is an entry of SLIDERS. o: {store, onChange(key), wide, bad, why, hint, unsetText}. The returned element has refresh(). */
+function makeRange(cfg, o){
+  const store=o.store, max=cfg.max, step=cfg.step||1, id=(cfg.store==='profile'?'pf-':'cap-')+cfg.key;
+  const okv=v=>v!==''&&v!=null&&Number.isFinite(Number(v))&&Number(v)>=0;
+  const snap=v=>Math.round(Math.max(0,Math.min(max,Math.round(v/step)*step))*100)/100;
+  const shown=v=>cfg.text(Math.min(max,v));
+  const out=h('div',{class:'hz-out unset','aria-hidden':'true'},o.unsetText||'Slide to choose');
+  const rng=h('input',{id,type:'range',min:'0',max:String(max),step:String(step),'aria-label':cfg.label});
+  const box=h('div',{class:'field hz unset'});
+  const errEl=(o.bad&&!cfg.optional)?h('p',{class:'err'},'Required'):null;
+  const refresh=()=>{
+    const good=okv(store[cfg.key]), raw=Number(store[cfg.key]), v=good?snap(raw):cfg.start;
+    rng.value=String(v); rng.setAttribute('style','--pct:'+(v/max*100)+'%');
+    out.textContent=good?shown(raw):(o.unsetText||'Slide to choose'); out.className='hz-out'+(good?'':' unset');
+    box.className='field'+(o.wide?' wide':'')+' hz'+(good?'':' unset')+((o.bad&&!good&&errEl)?' bad':'');
+    if(good) rng.setAttribute('aria-valuetext',shown(raw));
+    if(errEl) errEl.hidden=good;
+  };
+  const apply=v=>{ store[cfg.key]=String(snap(v)); refresh(); if(o.onChange) o.onChange(cfg.key); };
+  const cur=()=>Math.min(max,Number(store[cfg.key]));
+  rng.addEventListener('input',e=>apply(Number(e.target.value)));
+  const minus=h('button',{type:'button',class:'step','aria-label':cfg.stepLabel+' less',onclick:()=>apply(okv(store[cfg.key])?cur()-step:cfg.start-step)},'\u2212');
+  const plus=h('button',{type:'button',class:'step','aria-label':cfg.stepLabel+' more',onclick:()=>apply(okv(store[cfg.key])?cur()+step:cfg.start+step)},'+');
+  const ticks=h('div',{class:'hz-ticks','aria-hidden':'true'},cfg.ticks.map(n=>h('span',{style:'left:'+(n/max*100)+'%'},n===max?cfg.last:String(n))));
+  box.append(h('label',{for:id},cfg.label),h('span',{class:'hint'},o.hint||cfg.hint),(o.why&&WHY[cfg.key])?whyNote(WHY[cfg.key]):'',out,
+    h('div',{class:'hz-row'},minus,h('div',{class:'hz-track'},rng,ticks),plus));
+  if(errEl) box.append(errEl);
+  box.refresh=refresh; refresh();
+  return box;
+}
+
+/* Tick-box rows for a list stored as text ("Stocks, Bonds"). o: {options, none, get(), set(text), onChange(), keepExtra, rowClass}.
+   keepExtra keeps text from earlier records that matches no option. Returns {rows, refresh, extra}. */
+function choiceRows(o){
+  const all=o.none?[...o.options,o.none]:o.options.slice(), boxes={};
+  const tokens=()=>String(o.get()||'').split(', ').filter(Boolean);
+  const extra=()=>o.keepExtra?tokens().filter(t=>!all.includes(t)):[];
+  const refresh=()=>{ const toks=tokens(); all.forEach(x=>{ boxes[x].checked=toks.includes(x); }); };
+  const sync=changed=>{
+    if(o.none&&changed===o.none&&boxes[o.none].checked) o.options.forEach(x=>{ boxes[x].checked=false; });
+    else if(o.none&&changed!==o.none) boxes[o.none].checked=false;
+    const picked=o.options.filter(x=>boxes[x].checked); if(o.none&&boxes[o.none].checked) picked.push(o.none);
+    o.set([...picked,...extra()].join(', ')); if(o.onChange) o.onChange();
+  };
+  const rows=all.map(x=>{ const i=h('input',{type:'checkbox',onchange:()=>sync(x)}); boxes[x]=i; return h('label',{class:o.rowClass||'opt'},i,h('span',{},x)); });
+  refresh();
+  return {rows,refresh,extra};
+}
+/* Insurance is stored as a list plus a flag, so it gets its own adapter around choiceRows. */
+function insuranceRows(P, onChange, rowClass){
+  return choiceRows({options:INSURANCE, none:'None of these', rowClass,
+    get:()=>P.noInsurance?'None of these':P.insurance.join(', '),
+    set:txt=>{ P.noInsurance=/None of these/.test(txt); P.insurance=P.noInsurance?[]:txt.split(', ').filter(Boolean); },
+    onChange});
+}
+
+/* ===== PHONE APP =====
+   One question or one small group of questions per screen. Content, rules and helpers come from shared/. */
+const state = freshState();
+
+/* ----- screens ----- */
+const PROFILE_GROUPS = [
+  {title:'You and your household', keys:['age','marital','employment','income']},
+  {title:'Home and retirement', keys:['homeOwn','homeValue','retireAge','guaranteed','workPlan']},
+  {title:'Debt and other assets', keys:['debtTotal','tax','otherAssets','otherAssetsNote']},
+  {title:'Your investing history', keys:['historyYears','history']},
+  {title:'Goals and special circumstances', keys:['goals','restrictions']}
+];
+const CAP_GROUPS = [['horizon','income','emergency'],['withdrawal','liquidity','networth'],['debt','dependents']];
+const CAP_TITLES = ['Time, Income and Savings','Upcoming spending and net worth','Debt and dependents'];
+const steps = [{t:'welcome'},{t:'consent'},{t:'you'}];
+PROFILE_GROUPS.forEach(g => steps.push({t:'profile',title:g.title,keys:g.keys}));
+steps.push({t:'ins'});
+CAP_GROUPS.forEach((g,i) => steps.push({t:'cap',title:CAP_TITLES[i],part:(i+1)+' of '+CAP_GROUPS.length,keys:g}));
+HOLD_GROUPS.forEach(g => steps.push({t:'hold',title:g.title,part:g.part,keys:g.keys,maxPos:!!g.maxPos}));
+TOL_Q.forEach((q,i) => steps.push({t:'q',i}));
+steps.push({t:'review'},{t:'finish'},{t:'sent'});
+const SECTION_OF = {welcome:-1,consent:0,you:0,profile:1,ins:1,cap:2,hold:3,q:4,review:5,finish:5,sent:5};
+const SECTIONS = [
+  {name:'About you', desc:'Your agreement, name and advisor.'},
+  {name:'Your situation', desc:'Household, home, work, goals and insurance. Optional.'},
+  {name:'Your finances', desc:'Time horizon, income and savings.'},
+  {name:'Your investments', desc:'What you hold today. Optional.'},
+  {name:'Risk questions', desc:TOL_Q.length+' short questions about how you feel about loss.'},
+  {name:'Review and send', desc:'Check your answers, then send them to your advisor.'}
+];
+SECTIONS.forEach((x,i) => { x.start = steps.findIndex(s => SECTION_OF[s.t]===i); });
+const IDX = {consent:steps.findIndex(s=>s.t==='consent'), you:steps.findIndex(s=>s.t==='you'), ins:steps.findIndex(s=>s.t==='ins'),
+  cap:steps.findIndex(s=>s.t==='cap'), hold:steps.findIndex(s=>s.t==='hold'), q:steps.findIndex(s=>s.t==='q'),
+  review:steps.findIndex(s=>s.t==='review'), finish:steps.findIndex(s=>s.t==='finish'), sent:steps.findIndex(s=>s.t==='sent')};
+/* The screen that holds the answer behind a row of the review list. */
+function stepFor(key){
+  if(key==='name'||key==='advisor') return IDX.you;
+  if(key==='consent') return IDX.consent;
+  if(key==='ins') return IDX.ins;
+  if(key==='hold') return IDX.hold;
+  const [kind,k]=key.split(':');
+  if(kind==='q') return IDX.q+Number(k);
+  if(kind==='cap') return steps.findIndex(s=>s.t==='cap'&&s.keys.includes(k));
+  if(kind==='pf') return steps.findIndex(s=>s.t==='profile'&&s.keys.includes(k));
+  return IDX.you;
+}
+/* What is still missing on one screen. Returns a list of keys. */
+function stepMissing(s){
+  if(s.t==='consent') return state.consent?[]:['consent'];
+  if(s.t==='you') return state.name.trim()?[]:['name'];
+  if(s.t==='cap') return s.keys.filter(k=>CAP_REQ.includes(k)&&!capValid(state.cap[k]));
+  if(s.t==='q') return state.tol[s.i]==null?['q']:[];
+  if(s.t==='hold'&&s.maxPos) return progress(state).holdIssue?['hold']:[];
+  if(s.t==='review') return progress(state).complete?[]:['review'];
+  return [];
+}
+/* Where a "missing" item in the review list should take the client. */
+function stepForMissing(m){
+  if(m.where==='consent') return IDX.consent;
+  if(m.where==='name') return IDX.you;
+  if(m.where==='cap') return IDX.cap;
+  if(m.where==='hold') return IDX.hold;
+  if(m.where==='q') return IDX.q+Math.max(0,m.index);
+  return IDX.review;
+}
+
+/* ----- draft (saved on this device only, deleted after 7 days or on request) ----- */
+const DRAFT_KEY = 'investor-qq-draft-v1', DRAFT_MS = 7*24*3600*1000;
+function loadDraft(){
+  try{
+    const raw=localStorage.getItem(DRAFT_KEY); if(!raw) return null;
+    const d=JSON.parse(raw);
+    if(!d||!d.state||Date.now()-d.savedAt>DRAFT_MS){ localStorage.removeItem(DRAFT_KEY); return null; }
+    return d;
+  }catch(e){ return null; }
+}
+function saveDraft(step){ try{ localStorage.setItem(DRAFT_KEY,JSON.stringify({savedAt:Date.now(),step,ver:3,state})); }catch(e){} }
+function clearDraft(){ try{ localStorage.removeItem(DRAFT_KEY); }catch(e){} }
+function applyDraft(d){
+  const f=freshState(), s=d.state||{};
+  state.name=String(s.name||''); state.advisor=String(s.advisor||'');
+  state.tol=TOL_Q.map((q,i)=>{ const v=Number((s.tol||[])[i]); return v>=1&&v<=q.opts.length?v:null; });
+  Object.keys(f.cap).forEach(k=>{ state.cap[k]=String((s.cap||{})[k]==null?'':s.cap[k]); });
+  const P=s.profile||{};
+  Object.keys(f.profile).forEach(k=>{ if(k!=='insurance'&&k!=='noInsurance') state.profile[k]=String(P[k]==null?'':P[k]); });
+  state.profile.insurance=Array.isArray(P.insurance)?P.insurance.filter(x=>INSURANCE.includes(x)):[];
+  state.profile.noInsurance=!!P.noInsurance;
+  state.profile.income=incomeRangeFor(state.profile.income); state.profile.debtTotal=debtRangeFor(state.profile.debtTotal);   /* drafts from before ranges hold dollars */
+  state.taxAuto=String(s.taxAuto||'');
+  state.consent=(s.consent&&s.consent.acceptedAt)?{version:String(s.consent.version||''),acceptedAt:String(s.consent.acceptedAt),approved:!!s.consent.approved}:null;
+  /* Drafts saved before version 2 held dollar amounts here, so they are not reused as percentages. */
+  const keep=d.ver>=2;
+  state.hold=HOLD_CLASSES.map((c,i)=>keep?String((s.hold||[])[i]==null?'':s.hold[i]):'');
+  state.maxPos=keep?String(s.maxPos==null?'':s.maxPos):'';
+  state.holdTotal=keep?String(s.holdTotal==null?'':s.holdTotal):'';
+}
+function resetState(){ Object.assign(state,freshState()); }
+
+/* ----- the screens ----- */
+let stepIdx=0, showErrors=false, draft=null, focusEl=null, returnToReview=false, sentAt=null;
+/* True when the page runs inside the native iPhone app (the Capacitor shell) instead of a browser. */
+const isNative = ()=> typeof window!=='undefined' && !!(window.Capacitor && typeof window.Capacitor.isNativePlatform==='function' && window.Capacitor.isNativePlatform());
+const isIos = ()=>{ if(typeof navigator==='undefined') return false; const ua=navigator.userAgent||''; return /iPad|iPhone|iPod/.test(ua)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1); };
+const isStandalone = ()=>{ if(typeof navigator==='undefined') return false; return navigator.standalone===true||!!(typeof window!=='undefined'&&window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches); };
+const app = {};
+if(typeof document!=='undefined'){
+
 const touch = ()=>{ saveDraft(stepIdx); updateMeter(); };
 function updateMeter(){
   const m=$('#meter'); if(!m) return;
@@ -406,103 +897,46 @@ function updateMeter(){
 /* Every screen is a history entry, so the phone's back swipe or back button moves one screen back instead of leaving the questionnaire. */
 const sid = Date.now().toString(36)+Math.random().toString(36).slice(2,6);   /* marks this page load, so entries left over from before a reload are ignored */
 const clampStep = n => Math.max(0,Math.min(steps.length-1,n));
-const show = n => { stepIdx=clampStep(n); showErrors=false; render(); try{ window.scrollTo(0,0); }catch(e){} };
+const show = n => { stepIdx=clampStep(n); if(steps[stepIdx].t==='review') returnToReview=false; showErrors=false; render(); try{ window.scrollTo(0,0); }catch(e){} };
 const go = n => { n=clampStep(n); if(n===stepIdx){ show(n); return; } try{ history.pushState({step:n,sid},''); }catch(e){} show(n); };
 window.addEventListener('popstate',e=>{
   const st=e.state;
   if(st&&st.sid===sid&&typeof st.step==='number') show(st.step);
   else { try{ history.replaceState({step:0,sid},''); }catch(err){} show(0); }
 });
+/* Open the screen behind a review row and come back to the review when done. */
+const editRow = key => { returnToReview=true; go(stepFor(key)); };
+const finishEdit = () => { returnToReview=false; go(IDX.review); };
 
-function fieldFor(f, obj, prefix, bad){
-  const id=prefix+f.k, on=e=>{obj[f.k]=e.target.value;touch();};
-  let control;
-  if(f.type==='select'){
-    const opts=f.opts.map(o=>Array.isArray(o)?{v:o[0],t:o[1]}:{v:o,t:o});
-    control=h('select',{id,onchange:on},h('option',{value:''},'Select'),opts.map(o=>h('option',{value:o.v},o.t)));
-    control.value=obj[f.k];
-  } else if(f.type==='textarea'){
-    control=h('textarea',{id,oninput:on}); control.value=obj[f.k];
-  } else {
-    control=h('input',{id,type:f.type==='number'?'number':'text',min:f.type==='number'?'0':null,step:f.step,inputmode:f.type==='number'?'decimal':null,autocomplete:'off',oninput:on}); control.value=obj[f.k];
-  }
-  return h('div',{class:'field'+(bad?' bad':'')},h('label',{for:id},f.label),f.hint?h('span',{class:'hint'},f.hint):null,control,bad?h('p',{class:'err'},'Required'):null);
+/* form fields for this page: "why we ask" notes, a Required message, and the draft saved on every change */
+const fieldFor = (f,obj,prefix,bad)=>buildField(f,obj,prefix,{why:true,bad,onChange:()=>touch()});
+
+/* conditional fields (home value only shows for people who own a home) */
+function profileFields(s,wrap){
+  const conditional=[];
+  const refreshConditional=()=>conditional.forEach(c=>{ const on=c.f.showIf(state.profile); c.box.hidden=!on; if(!on&&state.profile[c.f.k]!==''){ state.profile[c.f.k]=''; const el=$('#pf-'+c.f.k); if(el) el.value=''; } });
+  s.keys.forEach(k=>{
+    const f=PF.find(x=>x.k===k);
+    if(k==='history'){
+      const g=choiceRows({options:HIST_OPTIONS,none:HIST_NONE,get:()=>state.profile.history,set:t=>{state.profile.history=t;},onChange:touch});
+      wrap.append(h('fieldset',{class:'group'},h('legend',{class:'flabel'},'What have you invested in before?'),h('span',{class:'hint'},'Tick all that apply.'),g.rows)); return;
+    }
+    if(k==='goals'){
+      const g=choiceRows({options:GOAL_OPTIONS,get:()=>state.profile.goals,set:t=>{state.profile.goals=t;},onChange:touch});
+      const note=h('textarea',{id:'pf-goalsNote',oninput:e=>{ state.profile.goalsNote=e.target.value; touch(); }}); note.value=state.profile.goalsNote||'';
+      wrap.append(h('fieldset',{class:'group'},h('legend',{class:'flabel'},'Financial goals'),h('span',{class:'hint'},'What is this money for? Tick all that apply.'),g.rows),
+        h('div',{class:'field'},h('label',{for:'pf-goalsNote'},'Anything to add about your goals or timing?'),h('span',{class:'hint'},'For example, "college in 8 years" or "retire at 62".'),note)); return;
+    }
+    if(SLIDERS[k]){ wrap.append(makeRange(SLIDERS[k],{store:state.profile,onChange:touch,why:true})); return; }
+    if(k==='tax') applyTaxEstimate(state);
+    const box=buildField(f,state.profile,'pf-',{why:true,onChange:kk=>{ if(kk==='homeOwn') refreshConditional(); touch(); }});
+    if(k==='tax'){ const est=estimateTaxBracket(state.profile.income,state.profile.marital); if(est) box.append(h('span',{class:'hint',id:'tax-note',style:'margin-top:6px'},taxNote(est))); }
+    if(f.showIf){ conditional.push({f,box}); }
+    wrap.append(box);
+  });
+  refreshConditional();
 }
-const HISTORY_OPTIONS=['Stocks','Bonds','ETFs','Real Estate','Gold','Alternative Assets','Private Equity'], HISTORY_NONE='None of these';
-function historyField(){
-  const P=state.profile, boxes={};
-  const sel=new Set(String(P.history||'').split(', '));
-  const sync=changed=>{
-    if(changed===HISTORY_NONE && boxes[HISTORY_NONE].checked) HISTORY_OPTIONS.forEach(o=>{boxes[o].checked=false;});
-    else if(changed!==HISTORY_NONE) boxes[HISTORY_NONE].checked=false;
-    const picked=HISTORY_OPTIONS.filter(o=>boxes[o].checked);
-    if(boxes[HISTORY_NONE].checked) picked.push(HISTORY_NONE);
-    P.history=picked.join(', '); touch();
-  };
-  const row=label=>{ const i=h('input',{type:'checkbox',onchange:()=>sync(label)}); i.checked=sel.has(label); boxes[label]=i; return h('label',{class:'opt'},i,h('span',{},label)); };
-  return h('fieldset',{class:'group'},
-    h('legend',{class:'flabel'},'What have you invested in before?'),
-    h('span',{class:'hint'},'Tick all that apply.'),
-    HISTORY_OPTIONS.map(row), row(HISTORY_NONE));
-}
-const GOAL_OPTIONS=['Retirement', 'College tuition', 'Buying a home', 'Emergency savings', 'Growing my wealth', 'Generating income', 'Leaving an inheritance', 'Starting or buying a business', 'Paying off debt', 'Travel or a large purchase', 'Giving to charity'];
-function goalsField(){
-  const P=state.profile, boxes={}, sel=new Set(String(P.goals||'').split(', '));
-  const sync=()=>{ P.goals=GOAL_OPTIONS.filter(o=>boxes[o].checked).join(', '); touch(); };
-  const row=label=>{ const i=h('input',{type:'checkbox',onchange:sync}); i.checked=sel.has(label); boxes[label]=i; return h('label',{class:'opt'},i,h('span',{},label)); };
-  const note=h('textarea',{id:'pf-goalsNote',oninput:e=>{P.goalsNote=e.target.value;touch();}}); note.value=P.goalsNote||'';
-  return h('div',{},
-    h('fieldset',{class:'group'},h('legend',{class:'flabel'},'Financial goals'),h('span',{class:'hint'},'What is this money for? Tick all that apply.'),GOAL_OPTIONS.map(row)),
-    h('div',{class:'field'},h('label',{for:'pf-goalsNote'},'Anything to add about your goals or timing?'),h('span',{class:'hint'},'For example, "college in 8 years" or "retire at 62".'),note));
-}
-const SLIDERS={
-  horizon:{key:'horizon',stepLabel:'One year',label:'Years until a large withdrawal might be needed',max:30,start:15,ticks:[0,5,10,15,20,25,30],last:'30+',
-    text:v=>v<=0?'Less than 1 year':v===1?'1 year':v>=30?'30 or more years':v+' years',
-    hint:'Drag the slider, or use the minus and plus buttons. Choose 0 if you may need it within a year.'},
-  emergency:{key:'emergency',stepLabel:'One month',label:'Emergency reserves, in months',max:24,start:6,ticks:[0,6,12,18,24],last:'24+',
-    text:v=>v<=0?'None':v===1?'1 month':v>=24?'24 or more months':v+' months',
-    hint:'Cash outside this portfolio, in months of spending. Drag the slider, or use the minus and plus buttons. Choose 0 if you have none.'},
-  withdrawal:{key:'withdrawal',stepLabel:'Half a percent',label:'Planned withdrawals, % per year',max:12,step:0.5,start:3,ticks:[0,2,4,6,8,10,12],last:'12+',
-    text:v=>v<=0?'None':v>=12?'12% or more a year':v+'% a year',
-    hint:'Over the next five years. Drag the slider, or use the minus and plus buttons. Choose 0 if none.'},
-  liquidity:{key:'liquidity',stepLabel:'One percent',label:'Large expenses within 5 years, % of portfolio',max:50,start:10,ticks:[0,10,20,30,40,50],last:'50+',
-    text:v=>v<=0?'None':v>=50?'50% or more of your portfolio':v+'% of your portfolio',
-    hint:'Home purchase, tuition, and similar. Drag the slider, or use the minus and plus buttons. Choose 0 if none.'},
-  dependents:{key:'dependents',stepLabel:'One person',label:'Financial dependents',max:8,start:1,ticks:[0,1,2,3,4,5,6,7,8],last:'8+',
-    text:v=>v<=0?'None':v===1?'1 person':v>=8?'8 or more people':v+' people',
-    hint:'People who rely on you financially. Drag the slider, or use the minus and plus buttons. Choose 0 if none.'},
-  historyYears:{key:'historyYears',store:'profile',optional:true,stepLabel:'One year',label:'Years investing',max:40,start:10,ticks:[0,10,20,30,40],last:'40+',
-    text:v=>v<=0?'Less than 1 year':v===1?'1 year':v>=40?'40 or more years':v+' years',
-    hint:'Optional. Drag the slider, or use the minus and plus buttons. Leave it alone if you are not sure.'}
-};
-function rangeField(cfg,bad){
-  const store=state[cfg.store||'cap'], max=cfg.max, step=cfg.step||1, id=(cfg.store==='profile'?'pf-':'cap-')+cfg.key;
-  const okv=v=>v!==''&&v!=null&&Number.isFinite(Number(v))&&Number(v)>=0;
-  const snap=v=>Math.round(Math.max(0,Math.min(max,Math.round(v/step)*step))*100)/100;
-  const shown=v=>cfg.text(Math.min(max,v));
-  const raw0=store[cfg.key], chosen0=okv(raw0), start=chosen0?snap(Number(raw0)):cfg.start;
-  const out=h('div',{class:'hz-out'+(chosen0?'':' unset'),'aria-hidden':'true'},chosen0?shown(Number(raw0)):'Slide to choose');
-  const rng=h('input',{id,type:'range',min:'0',max:String(max),step:String(step),'aria-label':cfg.label});
-  rng.value=String(start); rng.setAttribute('style','--pct:'+(start/max*100)+'%');
-  const box=h('div',{class:'field hz'+(chosen0?'':' unset')+(bad?' bad':'')});
-  const errEl=(bad&&!cfg.optional)?h('p',{class:'err'},'Required'):null;
-  const apply=v=>{
-    v=snap(v); rng.value=String(v); store[cfg.key]=String(v);
-    out.textContent=shown(v); out.className='hz-out';
-    rng.setAttribute('aria-valuetext',shown(v)); rng.setAttribute('style','--pct:'+(v/max*100)+'%');
-    box.className='field hz'; if(errEl) errEl.hidden=true; touch();
-  };
-  const isSet=()=>okv(store[cfg.key]);
-  const cur=()=>Math.min(max,Number(store[cfg.key]));
-  rng.addEventListener('input',e=>apply(Number(e.target.value)));
-  const minus=h('button',{type:'button',class:'step','aria-label':cfg.stepLabel+' less',onclick:()=>apply(isSet()?cur()-step:cfg.start-step)},'\u2212');
-  const plus=h('button',{type:'button',class:'step','aria-label':cfg.stepLabel+' more',onclick:()=>apply(isSet()?cur()+step:cfg.start+step)},'+');
-  const ticks=h('div',{class:'hz-ticks','aria-hidden':'true'},cfg.ticks.map(n=>h('span',{style:'left:'+(n/max*100)+'%'},n===max?cfg.last:String(n))));
-  box.append(h('label',{for:id},cfg.label),h('span',{class:'hint'},cfg.hint),out,
-    h('div',{class:'hz-row'},minus,h('div',{class:'hz-track'},rng,ticks),plus));
-  if(errEl) box.append(errEl);
-  return box;
-}
+
 function screenFor(s){
   const wrap=h('div',{});
   const title=t=>{ const e=h('h2',{tabindex:'-1'},t); focusEl=e; return e; };
@@ -516,37 +950,40 @@ function screenFor(s){
         h('button',{type:'button',class:'btn wide',onclick:()=>{ applyDraft(draft); go(Math.min(Number(draft.step)||0,steps.length-1)); }},'Continue where I left off'),
         h('button',{type:'button',class:'btn ghost wide',onclick:()=>{ if(window.confirm('Delete the saved answers and start over?')){ clearDraft(); resetState(); draft=null; render(); } }},'Start over')));
     } else wrap.append(h('button',{type:'button',class:'btn wide',onclick:()=>go(1)},'Start'));
-    if(isIos()&&!isStandalone()) wrap.append(h('p',{class:'fine',id:'install-tip'},'Tip: to open this like an app, tap the Share button, then Add to Home Screen. Do this before you start, because answers saved in Safari may not carry over to the home-screen app.'));
+    if(isIos()&&!isStandalone()&&!isNative()) wrap.append(h('p',{class:'fine',id:'install-tip'},'Tip: to open this like an app, tap the Share button, then Add to Home Screen. Do this before you start, because answers saved in Safari may not carry over to the home-screen app.'));
     wrap.append(h('p',{class:'fine',id:'privacy-note'},'Nothing is sent anywhere while you fill this in. Your progress is saved on this device only, so you can leave and come back. At the end you send a file to your advisor, then you can delete your answers from this device.'));
+  }
+  else if(s.t==='consent'){
+    wrap.append(title('Before you start'));
+    if(!PRIVACY.approvedBy) wrap.append(h('div',{class:'draftbox',id:'consent-draft'},'Draft wording. Not yet approved by compliance.'));
+    privacyBlocks().forEach(b=>wrap.append(h('div',{class:'cblock'},h('strong',{},b.title),h('p',{},b.text))));
+    const cb=h('input',{type:'checkbox',id:'consent-box',onchange:e=>{ state.consent=e.target.checked?makeConsent():null; touch(); }}); cb.checked=!!state.consent;
+    wrap.append(h('label',{class:'opt'},cb,h('span',{},CONSENT_LABEL)));
+    if(showErrors&&!state.consent) wrap.append(h('p',{class:'err'},'Tick the box to continue.'));
   }
   else if(s.t==='you'){
     wrap.append(title('About you'));
     const miss=showErrors&&!state.name.trim();
     const nm=h('input',{id:'name',type:'text',autocomplete:'name',oninput:e=>{state.name=e.target.value;touch();}}); nm.value=state.name;
     const ad=h('input',{id:'advisor',type:'text',autocomplete:'off',oninput:e=>{state.advisor=e.target.value;touch();}}); ad.value=state.advisor;
-    wrap.append(h('div',{class:'field'+(miss?' bad':'')},h('label',{for:'name'},'Your name'),nm,miss?h('p',{class:'err'},'Required'):null),
+    wrap.append(h('div',{class:'field'+(miss?' bad':'')},h('label',{for:'name'},'Your name'),nm,miss?h('p',{class:'err'},'Required'):''),
                 h('div',{class:'field'},h('label',{for:'advisor'},'Your advisor\u2019s name'),ad));
   }
   else if(s.t==='profile'){
     wrap.append(title(s.title),h('p',{class:'lede'},'Optional. The more you share, the better your advisor can help.'));
-    s.keys.forEach(k=>wrap.append(k==='history'?historyField():k==='goals'?goalsField():SLIDERS[k]?rangeField(SLIDERS[k],false):fieldFor(PF.find(f=>f.k===k),state.profile,'pf-',false)));
+    profileFields(s,wrap);
   }
   else if(s.t==='ins'){
     wrap.append(title('Insurance you have'),h('p',{class:'lede'},'Optional. Tick all that apply.'));
-    const boxes={};
-    const sync=changed=>{
-      const P=state.profile;
-      if(changed==='__none' && boxes.__none.checked) INSURANCE.forEach(n=>{boxes[n].checked=false;});
-      else if(changed!=='__none') boxes.__none.checked=false;
-      P.insurance=INSURANCE.filter(n=>boxes[n].checked); P.noInsurance=boxes.__none.checked; touch();
-    };
-    const opt=(label,key,checked)=>{ const i=h('input',{type:'checkbox',onchange:()=>sync(key)}); i.checked=checked; boxes[key]=i; return h('label',{class:'opt'},i,h('span',{},label)); };
-    INSURANCE.forEach(n=>wrap.append(opt(n,n,state.profile.insurance.includes(n))));
-    wrap.append(opt('None of these','__none',state.profile.noInsurance));
+    insuranceRows(state.profile,touch).rows.forEach(r=>wrap.append(r));
   }
   else if(s.t==='cap'){
     wrap.append(title(s.title),h('p',{class:'lede'},'Estimates are fine.'));
-    s.keys.forEach(k=>{ const bad=showErrors&&CAP_REQ.includes(k)&&!capValid(state.cap[k]); const f=CAP_FIELDS.find(x=>x.k===k); wrap.append(SLIDERS[k]?rangeField(SLIDERS[k],bad):fieldFor(f,state.cap,'cap-',bad)); });
+    s.keys.forEach(k=>{
+      const bad=showErrors&&CAP_REQ.includes(k)&&!capValid(state.cap[k]);
+      if(SLIDERS[k]) wrap.append(makeRange(SLIDERS[k],{store:state.cap,onChange:touch,why:true,bad}));
+      else wrap.append(fieldFor(CAP_FIELDS.find(x=>x.k===k),state.cap,'cap-',bad));
+    });
   }
   else if(s.t==='hold'){
     const first=s.part.startsWith('1');
@@ -557,7 +994,7 @@ function screenFor(s){
     if(first){
       wrap.append(h('div',{class:'note'},h('p',{},'Own a mixed fund, such as a target-date fund? Split the percent across what it holds, or leave it blank and tell your advisor.')));
       const tv=h('input',{id:'hold-total',type:'number',min:'0',step:'1000',inputmode:'decimal',autocomplete:'off',placeholder:'$',oninput:e=>{state.holdTotal=e.target.value;touch();}}); tv.value=state.holdTotal;
-      wrap.append(h('div',{class:'field'},h('label',{for:'hold-total'},'Approximate total value of your investments ($)'),h('span',{class:'hint'},'Add up everything you list on these screens. It turns your percentages into dollar amounts for your advisor.'),tv));
+      wrap.append(h('div',{class:'field'},h('label',{for:'hold-total'},'Approximate total value of your investments ($)'),h('span',{class:'hint'},'Add up everything you list on these screens. It turns your percentages into dollar amounts for your advisor.'),whyNote(WHY.holdTotal),tv));
     }
     s.keys.forEach(i=>{
       const c=HOLD_CLASSES[i], id='hold-'+c.cls;
@@ -572,15 +1009,15 @@ function screenFor(s){
         ?'Your investments add up to '+p.holdPct+'%, not 100%. Adjust the percentages, or clear them to skip this section.'
         :'Add the approximate total value on the first investments screen.'));
     }
-    wrap.append(h('button',{type:'button',class:'btn ghost wide',onclick:()=>{ if(window.confirm('Clear everything you entered about your investments?')){ state.hold=Array(12).fill(''); state.holdTotal=''; state.maxPos=''; touch(); render(); } }},'Clear my investments'));
+    wrap.append(h('button',{type:'button',class:'btn ghost wide',onclick:()=>{ if(window.confirm('Clear everything you entered about your investments?')){ state.hold=Array(HOLD_CLASSES.length).fill(''); state.holdTotal=''; state.maxPos=''; touch(); render(); } }},'Clear my investments'));
   }
   else if(s.t==='q'){
     const q=TOL_Q[s.i];
     const fs=h('fieldset',{});
     const lg=h('legend',{tabindex:'-1'},q.q); focusEl=lg;
-    fs.append(lg);
+    fs.append(lg); if(q.why) fs.append(whyNote(q.why));
     q.opts.forEach((o,oi)=>{
-      const r=h('input',{type:'radio',name:'q'+s.i,value:String(oi+1),onchange:()=>{ state.tol[s.i]=oi+1; touch(); const at=stepIdx; setTimeout(()=>{ if(stepIdx===at) go(stepIdx+1); },220); }});
+      const r=h('input',{type:'radio',name:'q'+s.i,value:String(oi+1),onchange:()=>{ state.tol[s.i]=oi+1; touch(); const at=stepIdx; setTimeout(()=>{ if(stepIdx===at){ if(returnToReview) finishEdit(); else go(stepIdx+1); } },220); }});
       r.checked=state.tol[s.i]===oi+1;
       fs.append(h('label',{class:'opt'},r,h('span',{},o)));
     });
@@ -588,61 +1025,104 @@ function screenFor(s){
     if(showErrors&&state.tol[s.i]==null) wrap.append(h('p',{class:'err'},'Choose an answer to continue.'));
   }
   else if(s.t==='review'){
-    const p=progress(state);
+    const rec=buildRecord(state), p=progress(state);
     wrap.append(title('Review'));
     wrap.append(p.complete ? h('p',{class:'ok'},'Everything required is filled in.') : h('p',{class:'lede'},'Still needed before you can send your answers:'));
-    if(!p.complete) wrap.append(h('ul',{class:'miss'},p.missing.map(m=>h('li',{},h('span',{},m.label),h('button',{type:'button',class:'btn ghost',onclick:()=>go(m.go)},'Go')))));
-    const rows=[
-      ['Your name', state.name.trim()||'Needed'],
-      ['Required finance fields', p.capDone+' of '+CAP_REQ.length],
-      ['Risk questions', p.tolDone+' of '+TOL_Q.length],
-      ['Your investments', p.holdCount?p.holdPct+'% allocated'+(p.holdValue?', about $'+Math.round(p.holdValue).toLocaleString('en-US'):''):'Not entered']
-    ];
-    wrap.append(h('ul',{class:'sum'},rows.map(r=>h('li',{},h('span',{},r[0]),h('b',{},r[1])))));
-    if(!p.holdCount) wrap.append(h('p',{class:'fine'},'If you skip your investments, your advisor will add them from your statements.'));
+    if(!p.complete) wrap.append(h('ul',{class:'miss'},p.missing.map(m=>h('li',{},h('span',{},m.label),h('button',{type:'button',class:'btn ghost',onclick:()=>{ returnToReview=true; go(stepForMissing(m)); }},'Go')))));
+    wrap.append(h('p',{class:'fine'},'Tap any answer to change it. You will come back here afterwards.'));
+    const rowButton=(key,label,value,aria)=>h('li',{},h('button',{type:'button',class:'rowbtn','aria-label':aria||(label+', '+(value||'needed')+'. Change.'),onclick:()=>editRow(key)},
+      h('span',{class:'rl'},label),h('span',{class:'rvv'+(value?'':' needed')},value||'Needed'),h('span',{class:'chev','aria-hidden':'true'},'Edit')));
+    describeAnswers(rec).forEach((sec,si)=>{
+      const rows=sec.rows.filter(r=>r.value!==''||r.required);
+      const list=rows.map(r=>rowButton(r.key,r.label,r.value,r.qtext?('Question '+r.label.replace('Question ','')+': '+r.qtext+' '+(r.value||'Needed')+'. Change.'):null));
+      if(si===0) list.unshift(rowButton('consent','Agreement to share',state.consent?'Agreed '+new Date(state.consent.acceptedAt).toLocaleDateString('en-US',{year:'numeric',month:'short',day:'numeric'}):''));
+      if(!list.length) return;
+      wrap.append(h('h3',{class:'rv-h'},sec.title),h('ul',{class:'rv'},list));
+    });
   }
   else if(s.t==='finish'){
     wrap.append(h('div',{class:'done-badge','aria-hidden':'true'}),title('Send your answers to your advisor'),
       h('p',{class:'lede'},'Your answers are ready. If your firm gave you a secure upload link, use that instead of regular email, because the file contains personal and financial details.'));
     const status=h('p',{class:'status',role:'status',id:'dl-status'});
-    const canShare=(typeof navigator!=='undefined'&&typeof navigator.canShare==='function'&&typeof File!=='undefined');
+    const canShare=isNative()||(typeof navigator!=='undefined'&&typeof navigator.canShare==='function'&&typeof File!=='undefined');
     if(canShare) wrap.append(h('button',{type:'button',class:'btn wide',onclick:async()=>{ await sendFile(true,status); }},'Send to my advisor'));
-    const showDownload=!(isIos()&&isStandalone()&&canShare);
+    const showDownload=!isNative()&&!(isIos()&&isStandalone()&&canShare);
     if(showDownload) wrap.append(h('button',{type:'button',class:canShare?'btn ghost wide':'btn wide',onclick:async()=>{ await sendFile(false,status); }},'Download my answers'));
     wrap.append(status,
       h('p',{class:'fine'},'When you have sent the file, you can delete your answers from this device.'),
-      h('button',{type:'button',class:'btn ghost wide',onclick:()=>{ if(window.confirm('Delete your answers from this device? Make sure you have sent the file first.')){ clearDraft(); resetState(); draft=null; go(0); } }},'Delete my answers from this device'));
+      h('button',{type:'button',class:'btn ghost wide',onclick:()=>{ if(window.confirm('Delete your answers from this device? Make sure you have sent the file first.')){ clearDraft(); resetState(); draft=null; sentAt=null; go(0); } }},'Delete my answers from this device'));
+  }
+  else if(s.t==='sent'){
+    const rec=buildRecord(state);
+    wrap.append(h('div',{class:'done-badge','aria-hidden':'true'}),title('Your answers were sent'),
+      h('p',{class:'lede'},'Sent '+(sentAt||new Date()).toLocaleString('en-US',{dateStyle:'medium',timeStyle:'short'})+'. This is what you shared with your advisor.'));
+    const status=h('p',{class:'status',role:'status',id:'pdf-status'});
+    wrap.append(h('button',{type:'button',class:'btn wide',id:'pdf-copy',onclick:async()=>{ await savePdf(status); }},'Save a copy for my records (PDF)'),status);
+    const dl=h('dl',{class:'sentlist'});
+    describeAnswers(rec).forEach(sec=>{
+      const rows=sec.rows.filter(r=>r.value!=='');
+      if(!rows.length) return;
+      dl.append(h('h3',{},sec.title)); rows.forEach(r=>dl.append(h('div',{},h('dt',{},r.qtext||r.label),h('dd',{},r.value))));
+    });
+    wrap.append(dl,h('p',{class:'fine'},'The copy has no scores or recommendations. Your advisor will talk through the results with you.'),
+      h('button',{type:'button',class:'btn ghost wide',onclick:()=>{ if(window.confirm('Delete your answers from this device?')){ clearDraft(); resetState(); draft=null; sentAt=null; go(0); } }},'Delete my answers from this device'));
   }
   return wrap;
 }
-async function sha256(str){
-  try{
-    if(!(window.crypto && crypto.subtle)) return null;
-    const buf=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(str));
-    return [...new Uint8Array(buf)].map(b=>b.toString(16).padStart(2,'0')).join('');
-  }catch(e){ return null; }
-}
+
+/* ----- sending ----- */
 async function makeFile(){
   const rec=buildRecord(state), hash=await sha256(JSON.stringify(rec));
-  const slug=(state.name.trim()||'client').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')||'client';
   const out={record:rec,note:'Client questionnaire. Load this file in the advisor risk profile tool.'};
   if(hash) out.sha256=hash;
-  return {text:JSON.stringify(out,null,2), name:'risk-questionnaire-'+slug+'-'+isoDate()+'.json'};
+  return {text:JSON.stringify(out,null,2), name:answersFileName(rec,'json')};
 }
+function browserDownload(name,data,type){
+  const url=URL.createObjectURL(new Blob([data],{type}));
+  const a=h('a',{href:url,download:name}); document.body.append(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+/* Inside the native app: save a file to the app's temporary folder, open the iPhone share sheet, then delete the file. */
+async function nativeShare(name,data,isBase64,title){
+  const C=window.Capacitor, FS=C.registerPlugin('Filesystem'), SH=C.registerPlugin('Share');
+  const opts={path:name,data,directory:'CACHE'}; if(!isBase64) opts.encoding='utf8';
+  const saved=await FS.writeFile(opts);
+  try{ await SH.share({title,text:title,url:saved.uri,dialogTitle:'Send to your advisor'}); }
+  finally{ try{ await FS.deleteFile({path:name,directory:'CACHE'}); }catch(e){} }
+}
+const wasCancelled = e => /cancel/i.test(String((e&&(e.message||e.errorMessage))||e)) || (e&&e.name==='AbortError');
+/* Returns true when the answers were handed over (shared or downloaded). */
 async function sendFile(viaShare,status){
-  if(!progress(state).complete){ status.textContent='Some required answers are missing. Go back to the review.'; return; }
+  if(!progress(state).complete){ status.textContent='Some required answers are missing. Go back to the review.'; return false; }
   const f=await makeFile();
-  try{
-    if(viaShare){
-      const file=new File([f.text],f.name,{type:'application/json'});
-      if(navigator.canShare({files:[file]})){ await navigator.share({files:[file],title:'Investor questionnaire'}); status.textContent='Shared. You can now delete your answers from this device.'; return; }
-    }
-    const url=URL.createObjectURL(new Blob([f.text],{type:'application/json'}));
-    const a=h('a',{href:url,download:f.name}); document.body.append(a); a.click(); a.remove();
-    setTimeout(()=>URL.revokeObjectURL(url),1000);
-    status.textContent='Downloaded. Now send the file to your advisor.';
-  }catch(e){ if(e&&e.name==='AbortError') return; status.textContent='Could not send the file. Try Download my answers instead.'; }
+  let ok=false;
+  if(isNative()){
+    try{ await nativeShare(f.name,f.text,false,'Investor questionnaire'); ok=true; }
+    catch(e){ if(wasCancelled(e)) return false; status.textContent='Could not open the share sheet. Close the app, open it again and try once more.'; return false; }
+  } else {
+    try{
+      if(viaShare){
+        const file=new File([f.text],f.name,{type:'application/json'});
+        if(navigator.canShare({files:[file]})){ await navigator.share({files:[file],title:'Investor questionnaire'}); ok=true; }
+      }
+      if(!ok){ browserDownload(f.name,f.text,'application/json'); ok=true; }
+    }catch(e){ if(wasCancelled(e)) return false; status.textContent='Could not send the file. Try Download my answers instead.'; return false; }
+  }
+  if(ok){ sentAt=new Date(); go(IDX.sent); }
+  return ok;
 }
+/* The copy the client keeps: a PDF of their own answers, with no scores. */
+async function savePdf(status){
+  const rec=buildRecord(state), bytes=buildPdf(pdfDocFor(rec)), name=answersFileName(rec,'pdf');
+  try{
+    if(isNative()){ await nativeShare(name,pdfToBase64(bytes),true,'My questionnaire answers'); status.textContent='Saved.'; return; }
+    const file=new File([bytes],name,{type:'application/pdf'});
+    if(typeof navigator.canShare==='function'&&navigator.canShare({files:[file]})){ await navigator.share({files:[file],title:'My questionnaire answers'}); status.textContent='Saved.'; return; }
+    browserDownload(name,bytes,'application/pdf'); status.textContent='Downloaded.';
+  }catch(e){ if(wasCancelled(e)) return; status.textContent='Could not save the PDF. Try again.'; }
+}
+
+/* ----- the course line across the top ----- */
 const waypoints=[];
 /* Position on the course line, 0 to 100. Waypoints sit at equal spacing; the buoy moves between them as the client works through a section. */
 function courseAt(i){
@@ -665,14 +1145,14 @@ function render(){
   $('#m-right').textContent = s.t==='q' ? 'Question '+(s.i+1)+' of '+TOL_Q.length : (s.t==='cap'||s.t==='hold') ? 'Part '+s.part : '';
   focusEl=null;
   const scr=$('#screen'); scr.replaceChildren(screenFor(s));
-  const foot=$('#foot'), onWelcome=s.t==='welcome', onFinish=s.t==='finish';
-  foot.hidden = onWelcome||onFinish;
+  const foot=$('#foot');
+  foot.hidden = s.t==='welcome'||s.t==='finish'||s.t==='sent';
   $('#meter').hidden = s.t!=='hold'; updateMeter();
   $('#back').disabled = stepIdx===0;
   const nx=$('#next');
-  nx.textContent = s.t==='review'?'Continue':'Next';
+  nx.textContent = s.t==='review' ? 'Continue' : returnToReview ? 'Save and return to review' : 'Next';
   nx.disabled = s.t==='review' ? !progress(state).complete : false;
-  if(stepIdx>0) saveDraft(stepIdx);
+  if(stepIdx>0&&s.t!=='sent') saveDraft(stepIdx);
   if(focusEl&&focusEl.focus){ try{ focusEl.focus({preventScroll:true}); }catch(e){} }
 }
 $('#back').addEventListener('click',()=>{
@@ -683,18 +1163,19 @@ $('#back').addEventListener('click',()=>{
 $('#next').addEventListener('click',()=>{
   const miss=stepMissing(steps[stepIdx]);
   if(miss.length){ showErrors=true; render(); return; }
-  go(stepIdx+1);
+  if(returnToReview&&steps[stepIdx].t!=='review') finishEdit(); else go(stepIdx+1);
 });
 draft=loadDraft();
 try{ history.replaceState({step:0,sid},''); }catch(e){}
 buildCourse();
 render();
-if(typeof navigator!=='undefined'&&'serviceWorker' in navigator&&(location.protocol==='https:'||location.hostname==='localhost'||location.hostname==='127.0.0.1')){
+if(typeof navigator!=='undefined'&&'serviceWorker' in navigator&&!isNative()&&(location.protocol==='https:'||location.hostname==='localhost'||location.hostname==='127.0.0.1')){
   window.addEventListener('load',()=>{ navigator.serviceWorker.register('sw.js').catch(()=>{}); });
 }
 app.go=go; app.render=render; app.getStep=()=>stepIdx; app.getDraft=()=>draft; app.setDraft=d=>{draft=d;};
 }
-if(typeof window!=='undefined') window.__app=Object.assign(app,{state,steps,stepMissing,progress,buildRecord,loadDraft,saveDraft,clearDraft,applyDraft,resetState,IDX});
+if(typeof window!=='undefined') window.__app=Object.assign(app,{state,steps,stepMissing,stepFor,progress,buildRecord,loadDraft,saveDraft,clearDraft,applyDraft,resetState,IDX});
+
 </script>
 </body>
 </html>
