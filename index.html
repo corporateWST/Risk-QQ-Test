@@ -218,10 +218,11 @@ const PF=[
   {k:'otherAssetsNote',label:'Where those assets are held',type:'text'},
   {k:'historyYears',label:'Years investing',type:'number',step:'1'},
   {k:'history',label:'Investment history notes',hint:'Products used and how the client acted in past declines.',type:'text'},
-  {k:'goals',label:'Financial goals',hint:'What the money is for, and when.',type:'textarea',wide:true},
+  {k:'goals',label:'Financial goals',type:'choices'},
+  {k:'goalsNote',label:'Goal details',type:'note'},
   {k:'restrictions',label:'Restrictions and special circumstances',hint:'Values-based limits, employer stock, health, other.',type:'textarea',wide:true}
 ];
-const blankProfile = () => ({age:'',marital:'',employment:'',income:'',debtTotal:'',tax:'',otherAssets:'',otherAssetsNote:'',historyYears:'',history:'',goals:'',restrictions:'',insurance:[],noInsurance:false});
+const blankProfile = () => ({age:'',marital:'',employment:'',income:'',debtTotal:'',tax:'',otherAssets:'',otherAssetsNote:'',historyYears:'',history:'',goals:'',goalsNote:'',restrictions:'',insurance:[],noInsurance:false});
 
 /* ===== STATE, STEPS, RULES ===== */
 const isoDate = (dt=new Date()) => dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0');
@@ -396,6 +397,16 @@ function historyField(){
     h('span',{class:'hint'},'Tick all that apply.'),
     HISTORY_OPTIONS.map(row), row(HISTORY_NONE));
 }
+const GOAL_OPTIONS=['Retirement', 'College tuition', 'Buying a home', 'Emergency savings', 'Growing my wealth', 'Generating income', 'Leaving an inheritance', 'Starting or buying a business', 'Paying off debt', 'Travel or a large purchase', 'Giving to charity'];
+function goalsField(){
+  const P=state.profile, boxes={}, sel=new Set(String(P.goals||'').split(', '));
+  const sync=()=>{ P.goals=GOAL_OPTIONS.filter(o=>boxes[o].checked).join(', '); touch(); };
+  const row=label=>{ const i=h('input',{type:'checkbox',onchange:sync}); i.checked=sel.has(label); boxes[label]=i; return h('label',{class:'opt'},i,h('span',{},label)); };
+  const note=h('textarea',{id:'pf-goalsNote',oninput:e=>{P.goalsNote=e.target.value;touch();}}); note.value=P.goalsNote||'';
+  return h('div',{},
+    h('fieldset',{class:'group'},h('legend',{class:'flabel'},'Financial goals'),h('span',{class:'hint'},'What is this money for? Tick all that apply.'),GOAL_OPTIONS.map(row)),
+    h('div',{class:'field'},h('label',{for:'pf-goalsNote'},'Anything to add about your goals or timing?'),h('span',{class:'hint'},'For example, "college in 8 years" or "retire at 62".'),note));
+}
 const HORIZON_MAX=30;
 const horizonText=v=>v<=0?'Less than 1 year':v===1?'1 year':v>=HORIZON_MAX?HORIZON_MAX+' or more years':v+' years';
 function sliderField(bad){
@@ -453,7 +464,7 @@ function screenFor(s){
   }
   else if(s.t==='profile'){
     wrap.append(title(s.title),h('p',{class:'lede'},'Optional. The more you share, the better your advisor can help.'));
-    s.keys.forEach(k=>wrap.append(k==='history'?historyField():fieldFor(PF.find(f=>f.k===k),state.profile,'pf-',false)));
+    s.keys.forEach(k=>wrap.append(k==='history'?historyField():k==='goals'?goalsField():fieldFor(PF.find(f=>f.k===k),state.profile,'pf-',false)));
   }
   else if(s.t==='ins'){
     wrap.append(title('Insurance you have'),h('p',{class:'lede'},'Optional. Tick all that apply.'));
