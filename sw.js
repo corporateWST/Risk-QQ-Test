@@ -1,7 +1,7 @@
 /* Offline support for the investor questionnaire.
    It stores only the page, icons and manifest. It never stores a client's answers.
    To release a new version, change CACHE below so phones drop the old copy. */
-const CACHE = 'investor-qq-v4';
+const CACHE = 'investor-qq-v5';
 const SHELL = ['./', './index.html', './manifest.webmanifest', './icon.svg', './icon-192.png', './icon-512.png', './icon-maskable-512.png', './apple-touch-icon.png'];
 
 self.addEventListener('install', e => {

@@ -270,7 +270,7 @@ const HOLD_GROUPS=[
 const steps=[{t:'welcome'},{t:'you'}];
 PROFILE_GROUPS.forEach(g=>steps.push({t:'profile',title:g.title,keys:g.keys}));
 steps.push({t:'ins'});
-const CAP_TITLES=['Time, income and savings','Upcoming spending and net worth','Debt and dependents'];
+const CAP_TITLES=['Time, Income and Savings','Upcoming spending and net worth','Debt and dependents'];
 CAP_GROUPS.forEach((g,i)=>steps.push({t:'cap',title:CAP_TITLES[i],part:(i+1)+' of '+CAP_GROUPS.length,keys:g}));
 HOLD_GROUPS.forEach(g=>steps.push({t:'hold',title:g.title,part:g.part,keys:g.keys,maxPos:!!g.maxPos}));
 TOL_Q.forEach((q,i)=>steps.push({t:'q',i}));
@@ -422,33 +422,37 @@ function goalsField(){
     h('fieldset',{class:'group'},h('legend',{class:'flabel'},'Financial goals'),h('span',{class:'hint'},'What is this money for? Tick all that apply.'),GOAL_OPTIONS.map(row)),
     h('div',{class:'field'},h('label',{for:'pf-goalsNote'},'Anything to add about your goals or timing?'),h('span',{class:'hint'},'For example, "college in 8 years" or "retire at 62".'),note));
 }
-const HORIZON_MAX=30;
-const horizonText=v=>v<=0?'Less than 1 year':v===1?'1 year':v>=HORIZON_MAX?HORIZON_MAX+' or more years':v+' years';
-function sliderField(bad){
-  const chosen0=capValid(state.cap.horizon);
-  const start=chosen0?Math.min(HORIZON_MAX,Math.max(0,Math.round(Number(state.cap.horizon)))):15;
-  const out=h('div',{class:'hz-out'+(chosen0?'':' unset'),'aria-hidden':'true'},chosen0?horizonText(start):'Slide to choose');
-  const rng=h('input',{id:'cap-horizon',type:'range',min:'0',max:String(HORIZON_MAX),step:'1','aria-label':'Years until a large withdrawal might be needed'});
-  rng.value=String(start);
-  rng.setAttribute('style','--pct:'+(start/HORIZON_MAX*100)+'%');
+const SLIDERS={
+  horizon:{key:'horizon',unit:'year',label:'Years until a large withdrawal might be needed',max:30,start:15,ticks:[0,5,10,15,20,25,30],last:'30+',
+    text:v=>v<=0?'Less than 1 year':v===1?'1 year':v>=30?'30 or more years':v+' years',
+    hint:'Drag the slider, or use the minus and plus buttons. Choose 0 if you may need it within a year.'},
+  emergency:{key:'emergency',unit:'month',label:'Emergency reserves, in months',max:24,start:6,ticks:[0,6,12,18,24],last:'24+',
+    text:v=>v<=0?'None':v===1?'1 month':v>=24?'24 or more months':v+' months',
+    hint:'Cash outside this portfolio, in months of spending. Drag the slider, or use the minus and plus buttons. Choose 0 if you have none.'}
+};
+function rangeField(cfg,bad){
+  const max=cfg.max, id='cap-'+cfg.key, raw0=state.cap[cfg.key], chosen0=capValid(raw0);
+  const start=chosen0?Math.min(max,Math.max(0,Math.round(Number(raw0)))):cfg.start;
+  const shown=v=>cfg.text(Math.min(max,v));
+  const out=h('div',{class:'hz-out'+(chosen0?'':' unset'),'aria-hidden':'true'},chosen0?shown(Number(raw0)):'Slide to choose');
+  const rng=h('input',{id,type:'range',min:'0',max:String(max),step:'1','aria-label':cfg.label});
+  rng.value=String(start); rng.setAttribute('style','--pct:'+(start/max*100)+'%');
   const box=h('div',{class:'field hz'+(chosen0?'':' unset')+(bad?' bad':'')});
   const errEl=bad?h('p',{class:'err'},'Required'):null;
   const apply=v=>{
-    v=Math.max(0,Math.min(HORIZON_MAX,Math.round(v)));
-    rng.value=String(v); state.cap.horizon=String(v);
-    out.textContent=horizonText(v); out.className='hz-out';
-    rng.setAttribute('aria-valuetext',horizonText(v));
-    rng.setAttribute('style','--pct:'+(v/HORIZON_MAX*100)+'%');
+    v=Math.max(0,Math.min(max,Math.round(v)));
+    rng.value=String(v); state.cap[cfg.key]=String(v);
+    out.textContent=shown(v); out.className='hz-out';
+    rng.setAttribute('aria-valuetext',shown(v)); rng.setAttribute('style','--pct:'+(v/max*100)+'%');
     box.className='field hz'; if(errEl) errEl.hidden=true; touch();
   };
-  const current=()=>capValid(state.cap.horizon)?Number(state.cap.horizon):15;
+  const set=()=>capValid(state.cap[cfg.key]);
+  const cur=()=>Math.min(max,Number(state.cap[cfg.key]));
   rng.addEventListener('input',e=>apply(Number(e.target.value)));
-  const minus=h('button',{type:'button',class:'step','aria-label':'One year less',onclick:()=>apply(capValid(state.cap.horizon)?current()-1:14)},'\u2212');
-  const plus=h('button',{type:'button',class:'step','aria-label':'One year more',onclick:()=>apply(capValid(state.cap.horizon)?current()+1:16)},'+');
-  const ticks=h('div',{class:'hz-ticks','aria-hidden':'true'},[0,5,10,15,20,25,30].map(n=>h('span',{style:'left:'+(n/HORIZON_MAX*100)+'%'},n===HORIZON_MAX?'30+':String(n))));
-  box.append(h('label',{for:'cap-horizon'},'Years until a large withdrawal might be needed'),
-    h('span',{class:'hint'},'Drag the slider, or use the minus and plus buttons. Choose 0 if you may need it within a year.'),
-    out,
+  const minus=h('button',{type:'button',class:'step','aria-label':'One '+cfg.unit+' less',onclick:()=>apply(set()?cur()-1:cfg.start-1)},'\u2212');
+  const plus=h('button',{type:'button',class:'step','aria-label':'One '+cfg.unit+' more',onclick:()=>apply(set()?cur()+1:cfg.start+1)},'+');
+  const ticks=h('div',{class:'hz-ticks','aria-hidden':'true'},cfg.ticks.map(n=>h('span',{style:'left:'+(n/max*100)+'%'},n===max?cfg.last:String(n))));
+  box.append(h('label',{for:id},cfg.label),h('span',{class:'hint'},cfg.hint),out,
     h('div',{class:'hz-row'},minus,h('div',{class:'hz-track'},rng,ticks),plus));
   if(errEl) box.append(errEl);
   return box;
@@ -496,7 +500,7 @@ function screenFor(s){
   }
   else if(s.t==='cap'){
     wrap.append(title(s.title),h('p',{class:'lede'},'Estimates are fine.'));
-    s.keys.forEach(k=>{ const bad=showErrors&&CAP_REQ.includes(k)&&!capValid(state.cap[k]); const f=CAP_FIELDS.find(x=>x.k===k); wrap.append(k==='horizon'?sliderField(bad):fieldFor(f,state.cap,'cap-',bad)); });
+    s.keys.forEach(k=>{ const bad=showErrors&&CAP_REQ.includes(k)&&!capValid(state.cap[k]); const f=CAP_FIELDS.find(x=>x.k===k); wrap.append(SLIDERS[k]?rangeField(SLIDERS[k],bad):fieldFor(f,state.cap,'cap-',bad)); });
   }
   else if(s.t==='hold'){
     wrap.append(title(s.title),
