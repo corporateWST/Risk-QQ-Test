@@ -3,8 +3,15 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#1D5C7A">
+<meta name="theme-color" content="#EEF3F6" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0C1B2A" media="(prefers-color-scheme: dark)">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Questionnaire">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <meta name="robots" content="noindex">
 <title>Investor questionnaire</title>
 <style>
@@ -318,6 +325,8 @@ function resetState(){ const f=freshState(); state.name=f.name; state.advisor=f.
 
 /* ===== UI ===== */
 let stepIdx=0, showErrors=false, draft=null, focusEl=null;
+const isIos = ()=>{ if(typeof navigator==='undefined') return false; const ua=navigator.userAgent||''; return /iPad|iPhone|iPod/.test(ua)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1); };
+const isStandalone = ()=>{ if(typeof navigator==='undefined') return false; return navigator.standalone===true||!!(typeof window!=='undefined'&&window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches); };
 const app={};
 if(typeof document!=='undefined'){
 const $ = s=>document.querySelector(s);
@@ -361,6 +370,7 @@ function screenFor(s){
         h('button',{type:'button',class:'btn wide',onclick:()=>{ applyDraft(draft); go(Math.min(Number(draft.step)||0,steps.length-1)); }},'Continue where I left off'),
         h('button',{type:'button',class:'btn ghost wide',onclick:()=>{ if(window.confirm('Delete the saved answers and start over?')){ clearDraft(); resetState(); draft=null; render(); } }},'Start over')));
     } else wrap.append(h('button',{type:'button',class:'btn wide',onclick:()=>go(1)},'Start'));
+    if(isIos()&&!isStandalone()) wrap.append(h('p',{class:'fine',id:'install-tip'},'Tip: to open this like an app, tap the Share button, then Add to Home Screen. Do this before you start, because answers saved in Safari may not carry over to the home-screen app.'));
     wrap.append(h('p',{class:'fine',id:'privacy-note'},'Nothing is sent anywhere while you fill this in. Your progress is saved on this device only, so you can leave and come back. At the end you send a file to your advisor, then you can delete your answers from this device.'));
   }
   else if(s.t==='you'){
@@ -439,7 +449,9 @@ function screenFor(s){
     const status=h('p',{class:'status',role:'status',id:'dl-status'});
     const canShare=(typeof navigator!=='undefined'&&typeof navigator.canShare==='function'&&typeof File!=='undefined');
     if(canShare) wrap.append(h('button',{type:'button',class:'btn wide',onclick:async()=>{ await sendFile(true,status); }},'Send to my advisor'));
-    wrap.append(h('button',{type:'button',class:canShare?'btn ghost wide':'btn wide',onclick:async()=>{ await sendFile(false,status); }},'Download my answers'),status,
+    const showDownload=!(isIos()&&isStandalone()&&canShare);
+    if(showDownload) wrap.append(h('button',{type:'button',class:canShare?'btn ghost wide':'btn wide',onclick:async()=>{ await sendFile(false,status); }},'Download my answers'));
+    wrap.append(status,
       h('p',{class:'fine'},'When you have sent the file, you can delete your answers from this device.'),
       h('button',{type:'button',class:'btn ghost wide',onclick:()=>{ if(window.confirm('Delete your answers from this device? Make sure you have sent the file first.')){ clearDraft(); resetState(); draft=null; go(0); } }},'Delete my answers from this device'));
   }
@@ -513,6 +525,9 @@ $('#next').addEventListener('click',()=>{
 draft=loadDraft();
 buildCourse();
 render();
+if(typeof navigator!=='undefined'&&'serviceWorker' in navigator&&(location.protocol==='https:'||location.hostname==='localhost'||location.hostname==='127.0.0.1')){
+  window.addEventListener('load',()=>{ navigator.serviceWorker.register('sw.js').catch(()=>{}); });
+}
 app.go=go; app.render=render; app.getStep=()=>stepIdx; app.getDraft=()=>draft; app.setDraft=d=>{draft=d;};
 }
 if(typeof window!=='undefined') window.__app=Object.assign(app,{state,steps,stepMissing,progress,buildRecord,loadDraft,saveDraft,clearDraft,applyDraft,resetState,IDX});
