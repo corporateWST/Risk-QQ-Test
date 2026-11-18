@@ -255,7 +255,7 @@ function privacyBlocks(){
   return [
     {title:'What we collect', text:'Your answers to this questionnaire: details about you and your household, your finances and investments, and how you feel about investment risk.'},
     {title:'Who sees it', text:'Your advisor at '+firm+' and the people at '+firm+' who help your advisor.'},
-    {title:'How it is stored and sent', text:'While you fill this in, your progress is saved on this device only. When you finish, you send your answers to your advisor yourself. Nothing is sent before then. '+editWindowText()},
+    {title:'How it is stored and sent', text:'While you fill this in, your progress is saved on this device only. When you finish, you send your answers to your advisor yourself. Nothing is sent before then.'+(editWindowText()?' '+editWindowText():'')},
     {title:'How long we keep it', text:PRIVACY.retention||'[How long '+firm+' keeps your answers will be set by its compliance team.]'},
     {title:'Your choices', text:'You can delete your answers from this device at any time. '+(PRIVACY.contact?'To ask about your information after you have sent it, contact '+PRIVACY.contact+'.':'[The contact for questions about your information will be added by '+firm+'.]')}
   ];
@@ -265,12 +265,14 @@ function privacyBlocks(){
    changes. With EDIT_WINDOW_STRICT set to false, older files can still be reopened. The wording below follows the setting. */
 const EDIT_WINDOW_DAYS = 7;
 const EDIT_WINDOW_STRICT = true;
+/* Clients are not told about the window for now (owner's decision, Nov 18, 2026). Set to true to show the notices again. */
+const SHOW_EDIT_WINDOW_NOTICE = false;
 const editDeadline = iso => { const t=new Date(iso).getTime(); return isNaN(t)?null:new Date(t+EDIT_WINDOW_DAYS*86400000); };
 const longDate = d => d.toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'});
 const AFTER_WINDOW = () => EDIT_WINDOW_STRICT ? 'you will need to start again.' : 'your saved answers are deleted. You can still change them later by opening the file you sent.';
-const editWindowText = () => 'After you send your answers you have '+EDIT_WINDOW_DAYS+' days to change them. After that '+(EDIT_WINDOW_STRICT?'your saved answers are deleted and you will need to start again.':'your saved answers are deleted. You can still change them later by opening the file you sent.');
-const editWindowTextDesktop = () => 'After you download your answers you have '+EDIT_WINDOW_DAYS+' days to change them, by opening the file with the Update answers I sent earlier button. After that '+(EDIT_WINDOW_STRICT?'you will need to start again.':'you can still open the file, but your advisor may ask you to start again.');
-const editUntilText = iso => { const d=editDeadline(iso); return d?'You can change these answers until '+longDate(d)+'. After that '+AFTER_WINDOW():''; };
+const editWindowText = () => !SHOW_EDIT_WINDOW_NOTICE ? '' : 'After you send your answers you have '+EDIT_WINDOW_DAYS+' days to change them. After that '+(EDIT_WINDOW_STRICT?'your saved answers are deleted and you will need to start again.':'your saved answers are deleted. You can still change them later by opening the file you sent.');
+const editWindowTextDesktop = () => !SHOW_EDIT_WINDOW_NOTICE ? '' : 'After you download your answers you have '+EDIT_WINDOW_DAYS+' days to change them, by opening the file with the Update answers I sent earlier button. After that '+(EDIT_WINDOW_STRICT?'you will need to start again.':'you can still open the file, but your advisor may ask you to start again.');
+const editUntilText = iso => { const d=SHOW_EDIT_WINDOW_NOTICE?editDeadline(iso):null; return d?'You can change these answers until '+longDate(d)+'. After that '+AFTER_WINDOW():''; };
 const CONSENT_LABEL = 'I have read this and I agree to share my answers with my advisor.';
 const makeConsent = (now=new Date()) => ({version:PRIVACY.version, acceptedAt:now.toISOString(), approved:!!PRIVACY.approvedBy});
 
@@ -625,8 +627,8 @@ async function readEarlierAnswers(parsed, hashFn, now){
   if(rec.source!=='client-questionnaire') return {ok:false,message:'That file did not come from this questionnaire. Choose the file you sent to your advisor.'};
   if(EDIT_WINDOW_STRICT){
     const sentMs=new Date(rec.exportedAt).getTime(), nowMs=(now||new Date()).getTime();
-    if(isNaN(sentMs)) return {ok:false,message:'We could not tell when that file was sent, so it cannot be changed. Please start a new questionnaire.'};
-    if(nowMs-sentMs>EDIT_WINDOW_DAYS*86400000) return {ok:false,message:'That file is more than '+EDIT_WINDOW_DAYS+' days old, so it can no longer be changed. Please start a new questionnaire.'};
+    if(isNaN(sentMs)) return {ok:false,message:'We could not tell when that file was sent, so it cannot be updated here. Please ask your advisor to help you update it, or start a new questionnaire.'};
+    if(nowMs-sentMs>EDIT_WINDOW_DAYS*86400000) return {ok:false,message:SHOW_EDIT_WINDOW_NOTICE?'That file is more than '+EDIT_WINDOW_DAYS+' days old, so it can no longer be changed. Please start a new questionnaire.':'That file can no longer be updated here. Please ask your advisor to help you update it, or start a new questionnaire.'};
   }
   const text=JSON.stringify(rec), computed=hashFn?await hashFn(text):null;
   if(parsed.sha256&&computed&&computed!==parsed.sha256) return {ok:false,message:'That file has changed since it was saved, so it cannot be used. Choose the file you sent.'};
@@ -884,6 +886,7 @@ function insuranceRows(P, onChange, rowClass){
 const state = freshState();
 let baseline = null;      /* the earlier version's answers, kept so the review can mark what changed */
 let updateNotes = [];     /* messages from reading an earlier file */
+let sentStore = null;     /* the last file sent: {rec, hash, state}. Lets the client change what they sent without finding the file. */
 
 /* ----- screens ----- */
 const PROFILE_GROUPS = [
@@ -959,7 +962,7 @@ function loadDraft(){
     return d;
   }catch(e){ return null; }
 }
-function saveDraft(step){ try{ localStorage.setItem(DRAFT_KEY,JSON.stringify({savedAt:Date.now(),step,ver:3,state,baseline,updateNotes})); }catch(e){} }
+function saveDraft(step){ try{ localStorage.setItem(DRAFT_KEY,JSON.stringify({savedAt:Date.now(),step,ver:3,state,baseline,updateNotes,sent:sentStore})); }catch(e){} }
 function clearDraft(){ try{ localStorage.removeItem(DRAFT_KEY); }catch(e){} }
 function applyDraft(d){
   const f=freshState(), s=d.state||{};
@@ -976,6 +979,7 @@ function applyDraft(d){
   state.revision=Number(s.revision)>=1?Number(s.revision):1;
   state.previous=(s.previous&&typeof s.previous==='object'&&s.previous.hash!=null)?{revision:Number(s.previous.revision)||1,exportedAt:String(s.previous.exportedAt||''),hash:String(s.previous.hash||'')}:null;
   baseline=(d.baseline&&typeof d.baseline==='object')?d.baseline:null; updateNotes=Array.isArray(d.updateNotes)?d.updateNotes:[];
+  sentStore=(d.sent&&typeof d.sent==='object'&&d.sent.rec&&d.sent.state)?d.sent:null;
   state.consent=(s.consent&&s.consent.acceptedAt)?{version:String(s.consent.version||''),acceptedAt:String(s.consent.acceptedAt),approved:!!s.consent.approved}:null;
   /* Drafts saved before version 2 held dollar amounts here, so they are not reused as percentages. */
   const keep=d.ver>=2;
@@ -983,7 +987,7 @@ function applyDraft(d){
   state.maxPos=keep?String(s.maxPos==null?'':s.maxPos):'';
   state.holdTotal=keep?String(s.holdTotal==null?'':s.holdTotal):'';
 }
-function resetState(){ Object.assign(state,freshState()); baseline=null; updateNotes=[]; }
+function resetState(){ Object.assign(state,freshState()); baseline=null; updateNotes=[]; sentStore=null; }
 
 /* ----- the screens ----- */
 let stepIdx=0, showErrors=false, draft=null, focusEl=null, returnToReview=false;
@@ -1017,6 +1021,18 @@ window.addEventListener('popstate',e=>{
 const editRow = key => { returnToReview=true; go(stepFor(key)); };
 /* Back to the first screen. The saved answers are looked up again, so the home page offers to continue them. */
 const goHome = () => { draft=loadDraft(); go(0); };
+/* Make the answers on screen an update of the last file sent: next version number, and the file it replaces. */
+function bumpFromSent(){
+  if(!sentStore) return; const r=sentStore.rec;
+  if(state.revision<=r.revision){ state.revision=r.revision+1; state.previous={revision:r.revision,exportedAt:r.exportedAt,hash:sentStore.hash||''}; baseline=flatRows(r); }
+}
+/* Put the answers back as they were when sent. */
+function restoreSent(d){ applyDraft({ver:3,state:d.sent.state,baseline:null,updateNotes:[],sent:d.sent}); baseline=null; }
+/* "Change the answers I sent": fill in what was sent, ask for agreement again, then go to the review. */
+function beginUpdateFromSent(){
+  restoreSent(draft); state.consent=null; bumpFromSent(); updateNotes=[]; draft=null;
+  returnToReview=true; saveDraft(IDX.consent); go(IDX.consent);
+}
 const finishEdit = () => { returnToReview=false; go(IDX.review); };
 
 /* form fields for this page: "why we ask" notes, a Required message, and the draft saved on every change */
@@ -1052,20 +1068,35 @@ function screenFor(s){
   const wrap=h('div',{});
   const title=t=>{ const e=h('h2',{tabindex:'-1'},t); focusEl=e; return e; };
   if(s.t==='welcome'){
+    draft=loadDraft();     /* always look at what is saved now, so the home page never shows an old picture */
     const e=h('h1',{tabindex:'-1'},'Tell us about you and your money'); focusEl=e;
+    const route=h('ol',{class:'route'},SECTIONS.map((x,i)=>h('li',{class:i===0?'here':''},h('b',{},x.name),h('span',{},x.desc))));
     wrap.append(e,
-      h('p',{class:'lede'},'Your advisor uses your answers to understand your goals, your finances and how you feel about risk. It takes about 10 minutes. There are no right or wrong answers, and best estimates are fine.'),
-      h('ol',{class:'route'},SECTIONS.map((x,i)=>h('li',{class:i===0?'here':''},h('b',{},x.name),h('span',{},x.desc)))));
-    if(draft){
+      h('p',{class:'lede'},'Your advisor uses your answers to understand your goals, your finances and how you feel about risk. It takes about 10 minutes. There are no right or wrong answers, and best estimates are fine.'));
+    if(!draft) wrap.append(route);     /* with saved answers, the choices come first and the route follows them */
+    const sent=draft&&draft.sent?draft.sent:null, pending=!!(sent&&Number(draft.state.revision)>Number(sent.rec.revision));
+    if(sent){
+      const when=prettyDate(sent.rec.exportedAt), until=editUntilText(draft.state.sentAt||sent.rec.exportedAt);
+      wrap.append(h('div',{class:'resume',id:'sent-card'},
+        h('p',{},h('strong',{},pending?'You are changing the answers you sent on '+when+'. ':'You sent your answers on '+when+'. '),pending?'Your changes have not been sent yet.':''),
+        until?h('p',{class:'fine',id:'sent-card-until'},until):'',
+        pending?h('button',{type:'button',class:'btn wide',id:'continue-changes',onclick:()=>{ applyDraft(draft); go(Math.min(Number(draft.step)||0,steps.length-1)); }},'Continue my changes')
+               :h('button',{type:'button',class:'btn wide',id:'change-sent',onclick:()=>beginUpdateFromSent()},'Change the answers I sent'),
+        pending?h('button',{type:'button',class:'btn ghost wide',id:'discard-changes',onclick:()=>{ if(window.confirm('Discard the changes you have not sent? Your answers go back to what you sent.')){ restoreSent(draft); saveDraft(IDX.finish); draft=loadDraft(); render(); } }},'Discard my changes'):'',
+        h('button',{type:'button',class:'btn ghost wide',id:'start-over',onclick:()=>{ if(window.confirm('Delete the saved answers and start a new questionnaire? You will not be able to change the answers you sent from this app.')){ clearDraft(); resetState(); draft=null; render(); } }},'Start over')));
+    } else if(draft){
       wrap.append(h('div',{class:'resume'},h('p',{},h('strong',{},'Welcome back. '),'Your answers are saved on this device.'),
         h('button',{type:'button',class:'btn wide',onclick:()=>{ applyDraft(draft); go(Math.min(Number(draft.step)||0,steps.length-1)); }},'Continue where I left off'),
         h('button',{type:'button',class:'btn ghost wide',onclick:()=>{ if(window.confirm('Delete the saved answers and start over?')){ clearDraft(); resetState(); draft=null; render(); } }},'Start over')));
     } else wrap.append(h('button',{type:'button',class:'btn wide',onclick:()=>go(1)},'Start'));
-    const earlierMsg=h('p',{class:'status',role:'status',id:'earlier-status'});
-    const pick=h('input',{type:'file',accept:'.json,application/json',hidden:true,id:'earlier-file',onchange:async e=>{ const f=e.target.files&&e.target.files[0]; e.target.value=''; if(f) await loadEarlierFile(f,earlierMsg); }});
-    wrap.append(pick,h('button',{type:'button',class:'btn ghost wide',id:'earlier-btn',onclick:()=>pick.click()},'Update answers I sent earlier'),earlierMsg);
+    if(draft) wrap.append(route);
+    if(!sent){
+      const earlierMsg=h('p',{class:'status',role:'status',id:'earlier-status'});
+      const pick=h('input',{type:'file',accept:'.json,application/json',hidden:true,id:'earlier-file',onchange:async e=>{ const f=e.target.files&&e.target.files[0]; e.target.value=''; if(f) await loadEarlierFile(f,earlierMsg); }});
+      wrap.append(pick,h('button',{type:'button',class:'btn ghost wide',id:'earlier-btn',onclick:()=>pick.click()},'Update answers I sent earlier'),earlierMsg);
+    }
     if(isIos()&&!isStandalone()&&!isNative()) wrap.append(h('p',{class:'fine',id:'install-tip'},'Tip: to open this like an app, tap the Share button, then Add to Home Screen. Do this before you start, because answers saved in Safari may not carry over to the home-screen app.'));
-    wrap.append(h('p',{class:'fine',id:'privacy-note'},'Nothing is sent anywhere while you fill this in. Your progress is saved on this device only, so you can leave and come back. At the end you send a file to your advisor. '+editWindowText()+' You can also delete your answers from this device at any time.'));
+    wrap.append(h('p',{class:'fine',id:'privacy-note'},'Nothing is sent anywhere while you fill this in. Your progress is saved on this device only, so you can leave and come back. At the end you send a file to your advisor.'+(editWindowText()?' '+editWindowText():'')+' You can also delete your answers from this device at any time.'));
   }
   else if(s.t==='consent'){
     wrap.append(title('Before you start'));
@@ -1173,15 +1204,15 @@ function screenFor(s){
     const showDownload=!isNative()&&!(isIos()&&isStandalone()&&canShare);
     if(showDownload) wrap.append(h('button',{type:'button',class:canShare?'btn ghost wide':'btn wide',onclick:async()=>{ await sendFile(false,status); }},'Download my answers'));
     wrap.append(status,
-      h('p',{class:'fine',id:'edit-window-fine'},editWindowText()),
+      editWindowText()?h('p',{class:'fine',id:'edit-window-fine'},editWindowText()):'',
       h('p',{class:'fine'},'When you have sent the file, you can delete your answers from this device.'),
       h('button',{type:'button',class:'btn ghost wide',onclick:()=>{ if(window.confirm('Delete your answers from this device? Make sure you have sent the file first.')){ clearDraft(); resetState(); draft=null; go(0); } }},'Delete my answers from this device'));
   }
   else if(s.t==='sent'){
-    const rec=record();
+    const rec=sentStore?sentStore.rec:record();
     wrap.append(h('div',{class:'done-badge','aria-hidden':'true'}),title('Your answers were sent'),
-      h('p',{class:'lede'},'Sent '+(state.sentAt?new Date(state.sentAt):new Date()).toLocaleString('en-US',{dateStyle:'medium',timeStyle:'short'})+'. '+(state.previous?'This is version '+state.revision+'. It replaces the answers you sent'+(prettyDate(state.previous.exportedAt)?' on '+prettyDate(state.previous.exportedAt):'')+'. ':'')+'This is what you shared with your advisor.'));
-    wrap.append(h('div',{class:'note',id:'edit-window-note'},h('p',{},h('strong',{},editUntilText(state.sentAt||new Date().toISOString())))));
+      h('p',{class:'lede'},'Sent '+(state.sentAt?new Date(state.sentAt):new Date()).toLocaleString('en-US',{dateStyle:'medium',timeStyle:'short'})+'. '+(rec.supersedes?'This is version '+rec.revision+'. It replaces the answers you sent'+(prettyDate(rec.supersedes.exportedAt)?' on '+prettyDate(rec.supersedes.exportedAt):'')+'. ':'')+'This is what you shared with your advisor.'));
+    if(editUntilText(state.sentAt||new Date().toISOString())) wrap.append(h('div',{class:'note',id:'edit-window-note'},h('p',{},h('strong',{},editUntilText(state.sentAt||new Date().toISOString())))));
     const waiting=approvalItems(rec.changes);
     if(waiting.length) wrap.append(h('div',{class:'note',id:'approval-note'},h('p',{},h('strong',{},'Your advisor needs to approve '+(waiting.length===1?'this change':'these changes')+' before '+(waiting.length===1?'it takes':'they take')+' effect:')),...waiting.map(x=>h('p',{style:'margin-top:4px'},(x.short||x.label)+': '+x.from+' to '+x.to))));
     const status=h('p',{class:'status',role:'status',id:'pdf-status'});
@@ -1209,16 +1240,17 @@ async function loadEarlierFile(file,msg){
   const r=await readEarlierAnswers(parsed,sha256);
   if(!r.ok){ msg.textContent=r.message; return; }
   if((draft||hasAnswers())&&!window.confirm('This replaces the answers saved on this device with the answers from that file. Continue?')) return;
-  Object.assign(state,r.state); baseline=flatRows(r.record); updateNotes=r.notes; draft=null;
+  Object.assign(state,r.state); baseline=flatRows(r.record); updateNotes=r.notes; draft=null; sentStore=null;
   returnToReview=true; saveDraft(IDX.consent); go(IDX.consent);
 }
 
 /* ----- sending ----- */
 async function makeFile(){
+  bumpFromSent();     /* a second send of changed answers is the next version, not another copy of the same one */
   const rec=record(), hash=await sha256(JSON.stringify(rec));
   const out={record:rec,note:'Client questionnaire. Load this file in the advisor risk profile tool.'};
   if(hash) out.sha256=hash;
-  return {text:JSON.stringify(out,null,2), name:answersFileName(rec,'json')};
+  return {text:JSON.stringify(out,null,2), name:answersFileName(rec,'json'), rec, hash};
 }
 function browserDownload(name,data,type){
   const url=URL.createObjectURL(new Blob([data],{type}));
@@ -1251,12 +1283,12 @@ async function sendFile(viaShare,status){
       if(!ok){ browserDownload(f.name,f.text,'application/json'); ok=true; }
     }catch(e){ if(wasCancelled(e)) return false; status.textContent='Could not send the file. Try Download my answers instead.'; return false; }
   }
-  if(ok){ state.sentAt=new Date().toISOString(); saveDraft(IDX.finish); go(IDX.sent); }
+  if(ok){ state.sentAt=new Date().toISOString(); sentStore={rec:f.rec,hash:f.hash||'',state:JSON.parse(JSON.stringify(state))}; saveDraft(IDX.finish); go(IDX.sent); }
   return ok;
 }
 /* The copy the client keeps: a PDF of their own answers, with no scores. */
 async function savePdf(status){
-  const rec=record(), bytes=buildPdf(pdfDocFor(rec)), name=answersFileName(rec,'pdf');
+  const rec=sentStore?sentStore.rec:record(), bytes=buildPdf(pdfDocFor(rec)), name=answersFileName(rec,'pdf');
   try{
     if(isNative()){ await nativeShare(name,pdfToBase64(bytes),true,'My questionnaire answers'); status.textContent='Saved.'; return; }
     const file=new File([bytes],name,{type:'application/pdf'});
