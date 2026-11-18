@@ -167,6 +167,8 @@ ul.rv li{border-bottom:1px solid var(--line)}
 .rowbtn .rvv{flex:1;font-weight:600;min-width:0;overflow-wrap:anywhere}
 .rowbtn .rvv.needed{color:var(--bad)}
 .rowbtn .chev{flex:none;color:var(--tide);font-weight:600;font-size:14px}
+.chgtag.appr{background:transparent;border:1.5px solid var(--buoy);color:var(--text)}
+.chgtag{display:inline-block;margin-left:8px;padding:1px 9px;border-radius:999px;background:var(--buoy);color:#12304A;font-size:12px;font-weight:700;vertical-align:1px}
 dl.sentlist{margin:10px 0 18px}
 dl.sentlist h3{font-family:var(--serif);font-size:19px;margin:18px 0 4px}
 dl.sentlist div{display:flex;gap:12px;padding:8px 0;border-bottom:1px solid var(--line)}
@@ -253,13 +255,31 @@ function privacyBlocks(){
   return [
     {title:'What we collect', text:'Your answers to this questionnaire: details about you and your household, your finances and investments, and how you feel about investment risk.'},
     {title:'Who sees it', text:'Your advisor at '+firm+' and the people at '+firm+' who help your advisor.'},
-    {title:'How it is stored and sent', text:'While you fill this in, your progress is saved on this device only. When you finish, you send your answers to your advisor yourself. Nothing is sent before then.'},
+    {title:'How it is stored and sent', text:'While you fill this in, your progress is saved on this device only. When you finish, you send your answers to your advisor yourself. Nothing is sent before then. '+editWindowText()},
     {title:'How long we keep it', text:PRIVACY.retention||'[How long '+firm+' keeps your answers will be set by its compliance team.]'},
     {title:'Your choices', text:'You can delete your answers from this device at any time. '+(PRIVACY.contact?'To ask about your information after you have sent it, contact '+PRIVACY.contact+'.':'[The contact for questions about your information will be added by '+firm+'.]')}
   ];
 }
+/* ----- how long a client can change answers after sending -----
+   Saved answers on the phone are deleted this many days after sending, and a file older than this cannot be reopened for
+   changes. With EDIT_WINDOW_STRICT set to false, older files can still be reopened. The wording below follows the setting. */
+const EDIT_WINDOW_DAYS = 7;
+const EDIT_WINDOW_STRICT = true;
+const editDeadline = iso => { const t=new Date(iso).getTime(); return isNaN(t)?null:new Date(t+EDIT_WINDOW_DAYS*86400000); };
+const longDate = d => d.toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'});
+const AFTER_WINDOW = () => EDIT_WINDOW_STRICT ? 'you will need to start again.' : 'your saved answers are deleted. You can still change them later by opening the file you sent.';
+const editWindowText = () => 'After you send your answers you have '+EDIT_WINDOW_DAYS+' days to change them. After that '+(EDIT_WINDOW_STRICT?'your saved answers are deleted and you will need to start again.':'your saved answers are deleted. You can still change them later by opening the file you sent.');
+const editWindowTextDesktop = () => 'After you download your answers you have '+EDIT_WINDOW_DAYS+' days to change them, by opening the file with the Update answers I sent earlier button. After that '+(EDIT_WINDOW_STRICT?'you will need to start again.':'you can still open the file, but your advisor may ask you to start again.');
+const editUntilText = iso => { const d=editDeadline(iso); return d?'You can change these answers until '+longDate(d)+'. After that '+AFTER_WINDOW():''; };
 const CONSENT_LABEL = 'I have read this and I agree to share my answers with my advisor.';
 const makeConsent = (now=new Date()) => ({version:PRIVACY.version, acceptedAt:now.toISOString(), approved:!!PRIVACY.approvedBy});
+
+/* ----- changes that need the advisor's approval -----
+   When a client changes one of these answers after sending, the change waits for the advisor to approve it.
+   The default set is every risk question plus the finance answers that feed the capacity score. */
+const APPROVAL_KEYS = ['cap:horizon','cap:income','cap:emergency','cap:withdrawal','cap:liquidity','cap:debt','cap:dependents','cap:networth'];
+const needsApproval = key => /^q:\d+$/.test(String(key)) || APPROVAL_KEYS.includes(String(key));
+const APPROVAL_NOTE = 'Changes to this answer need your advisor\u2019s approval before they take effect.';
 
 /* ----- "why we ask" notes ----- */
 const WHY = {
@@ -470,7 +490,9 @@ const freshState = () => ({
   cap:{horizon:'',income:'',emergency:'',withdrawal:'',liquidity:'',networth:'',debt:'',dependents:''},
   profile:blankProfile(),
   hold:Array(HOLD_CLASSES.length).fill(''), maxPos:'', holdTotal:'',
-  consent:null, taxAuto:''
+  consent:null, taxAuto:'',
+  sentAt:'',                     /* when the answers were last sent, as a date and time. The saved copy is deleted EDIT_WINDOW_DAYS later. */
+  revision:1, previous:null      /* version number of these answers, and the file they replace: {revision, exportedAt, hash} */
 });
 /* Investments are entered as percentages. If any are entered they must add up to 100, and a total value is needed to turn them into dollars. */
 function holdSummary(st){
@@ -501,14 +523,16 @@ function progress(st){
   if(hs.issue==='total') missing.push({label:'Your investments: add the approximate total value', where:'hold'});
   return {tolDone,capDone,missing,complete:missing.length===0,holdCount:hs.count,holdPct:hs.pct,holdValue:hs.value,holdIssue:hs.issue};
 }
-function buildRecord(st){
-  return {
+function buildRecord(st, baselineMap){
+  const rec = {
     schema:RECORD_SCHEMA,
     bandScale:BAND_SCALE,
     questionnaireVersion:QUESTIONNAIRE_VERSION,
     source:'client-questionnaire',
     exportedAt:new Date().toISOString(),
     previousRecordHash:null,
+    revision:st.revision||1,
+    supersedes:st.previous?{revision:st.previous.revision,exportedAt:st.previous.exportedAt,hash:st.previous.hash}:null,
     client:{name:st.name.trim(),advisor:st.advisor.trim()},
     consent:st.consent||null,
     profile:st.profile,
@@ -522,6 +546,9 @@ function buildRecord(st){
     decision:{override:'',rationale:''},
     register:[], riskSeq:0
   };
+  /* what the client changed since the version they are replacing, with the ones that need the advisor's approval marked */
+  if(st.previous && baselineMap) rec.changes = diffMaps(baselineMap, flatRows(rec));
+  return rec;
 }
 
 /* ----- a plain-language description of a record: the review screen, the confirmation and the PDF all use this ----- */
@@ -569,17 +596,91 @@ function describeAnswers(rec){
   sections.push({id:'risk',title:'How you feel about risk',rows:TOL_Q.map((q,i)=>row('q:'+i,'Question '+(i+1),(T[i]&&T[i].answer)||'',{required:true,qtext:q.q}))});
   return sections;
 }
+/* ----- changing answers after they were sent -----
+   Each send is a numbered version. A new version names the file it replaces (its number, date and fingerprint),
+   so the advisor can see the chain and what changed. */
+const prettyDate = iso => { const d=new Date(iso); return isNaN(d)?'':d.toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'}); };
+function updateNote(rec){
+  if(!rec||!rec.supersedes||!(rec.revision>1)) return '';
+  const when=prettyDate(rec.supersedes.exportedAt);
+  return 'Updated answers (version '+rec.revision+'). They replace the answers sent'+(when?' on '+when:'')+'.';
+}
+/* Dollar amounts per asset class back into percentages that add up to exactly 100, plus the total. */
+function holdingsToPercents(holdings){
+  const hold=Array(HOLD_CLASSES.length).fill(''); const rows=(Array.isArray(holdings)?holdings:[]).map(x=>({i:HOLD_CLASSES.findIndex(c=>c.cls===Number(x&&x.cls)),amt:Number(x&&x.amt)})).filter(r=>r.i>=0&&r.amt>0);
+  const total=rows.reduce((a,r)=>a+r.amt,0);
+  if(!rows.length) return {hold,total:''};
+  const pcts=rows.map(r=>Math.round(r.amt/total*10000)/100);
+  const drift=Math.round((100-pcts.reduce((a,b)=>a+b,0))*100)/100;
+  const big=pcts.indexOf(Math.max(...pcts)); pcts[big]=Math.round((pcts[big]+drift)*100)/100;
+  rows.forEach((r,k)=>{ hold[r.i]=String(pcts[k]); });
+  return {hold,total:String(Math.round(total))};
+}
+/* Read a file the client sent earlier and turn it back into answers they can edit.
+   parsed is the file as read from disk. hashFn is sha256 in a browser. Returns {ok:true,state,record,notes} or {ok:false,message}. */
+async function readEarlierAnswers(parsed, hashFn, now){
+  const str=v=>v==null?'':String(v);
+  const rec=parsed&&typeof parsed==='object'?(parsed.record||null):null;
+  if(!rec||rec.schema!==RECORD_SCHEMA||!rec.inputs||!rec.client) return {ok:false,message:'That file is not a saved questionnaire.'};
+  if(rec.source!=='client-questionnaire') return {ok:false,message:'That file did not come from this questionnaire. Choose the file you sent to your advisor.'};
+  if(EDIT_WINDOW_STRICT){
+    const sentMs=new Date(rec.exportedAt).getTime(), nowMs=(now||new Date()).getTime();
+    if(isNaN(sentMs)) return {ok:false,message:'We could not tell when that file was sent, so it cannot be changed. Please start a new questionnaire.'};
+    if(nowMs-sentMs>EDIT_WINDOW_DAYS*86400000) return {ok:false,message:'That file is more than '+EDIT_WINDOW_DAYS+' days old, so it can no longer be changed. Please start a new questionnaire.'};
+  }
+  const text=JSON.stringify(rec), computed=hashFn?await hashFn(text):null;
+  if(parsed.sha256&&computed&&computed!==parsed.sha256) return {ok:false,message:'That file has changed since it was saved, so it cannot be used. Choose the file you sent.'};
+  const hash=parsed.sha256||computed||'';
+  const st=freshState(), I=rec.inputs, P=rec.profile||{}, notes=[];
+  st.name=str(rec.client.name); st.advisor=str(rec.client.advisor);
+  if(rec.questionnaireVersion===QUESTIONNAIRE_VERSION){
+    st.tol=TOL_Q.map((q,i)=>{ const t=(I.tolerance||[])[i], v=t&&Number(t.value); return v>=1&&v<=q.opts.length?v:null; });
+  } else notes.push('The risk questions have changed since you sent this file, so please answer them again.');
+  CAP_FIELDS.forEach(f=>{ st.cap[f.k]=str((I.capacity||{})[f.k]); });
+  Object.keys(st.profile).forEach(k=>{ if(k!=='insurance'&&k!=='noInsurance') st.profile[k]=str(P[k]); });
+  st.profile.insurance=Array.isArray(P.insurance)?P.insurance.filter(x=>INSURANCE.includes(x)):[];
+  st.profile.noInsurance=!!P.noInsurance;
+  st.profile.income=incomeRangeFor(st.profile.income); st.profile.debtTotal=debtRangeFor(st.profile.debtTotal);
+  const est=estimateTaxBracket(st.profile.income,st.profile.marital);
+  st.taxAuto=(est&&st.profile.tax===est.bucket)?est.bucket:'';
+  const hp=holdingsToPercents(I.holdings); st.hold=hp.hold; st.holdTotal=hp.total; st.maxPos=str(I.largestSecurityPct);
+  st.consent=null;                                   /* a new send needs a new agreement */
+  const rev=Number(rec.revision)>=1?Number(rec.revision):1;
+  st.revision=rev+1; st.previous={revision:rev,exportedAt:str(rec.exportedAt),hash};
+  return {ok:true,state:st,record:rec,notes};
+}
+/* Answers as {key:{label,value}}, so two versions can be compared. */
+function flatRows(rec){
+  const out={};
+  describeAnswers(rec).forEach(sec=>sec.rows.forEach(r=>{ out[r.key==='hold'?'hold:'+r.label:r.key]={label:r.qtext?r.qtext:r.label,short:r.label,value:r.value,section:sec.title}; }));
+  return out;
+}
+/* What is different between an earlier and a later version of the answers, in reading order. */
+function diffMaps(a,b){
+  const keys=[...Object.keys(b),...Object.keys(a).filter(k=>!(k in b))], out=[];
+  keys.forEach(k=>{
+    const from=a[k]?a[k].value:'', to=b[k]?b[k].value:'';
+    if(from!==to) out.push({key:k,label:(b[k]||a[k]).label,short:(b[k]||a[k]).short,section:(b[k]||a[k]).section,from:from||'Not answered',to:to||'Not answered',needsApproval:needsApproval(k)});
+  });
+  return out;
+}
+const diffAnswers = (oldRec,newRec) => diffMaps(flatRows(oldRec),flatRows(newRec));
+const approvalItems = list => (Array.isArray(list)?list:[]).filter(x=>x&&needsApproval(x.key));
 function pdfDocFor(rec, now){
   now = now||new Date();
   const when=now.toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'});
   const name=(rec.client&&rec.client.name)||'', adv=(rec.client&&rec.client.advisor)||'';
   const lines=['Prepared for '+(name||'you')+' on '+when+'.'];
   if(adv) lines.push('Your advisor: '+adv+' at '+PRIVACY.firm+'.'); else lines.push('Shared with '+PRIVACY.firm+'.');
+  const upd=updateNote(rec); if(upd) lines.push(upd);
+  const until=editUntilText(rec.exportedAt); if(until) lines.push(until);
+  const waiting=approvalItems(rec.changes); if(waiting.length) lines.push('Some of these changes need your advisor\u2019s approval before they take effect.');
   if(rec.consent&&rec.consent.acceptedAt) lines.push('You agreed to share these answers on '+new Date(rec.consent.acceptedAt).toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'})+'.');
   return {
     title:'Your investor questionnaire',
     lines,
-    sections:describeAnswers(rec).filter(s=>s.id!=='you').map(s=>({title:s.title,rows:s.rows.map(r=>[r.qtext||r.label,r.value])})),
+    sections:[...(Array.isArray(rec.changes)&&rec.changes.length?[{title:'Changes since your earlier answers',rows:rec.changes.map(c=>[c.label+(c.needsApproval?' (needs approval)':''),c.from+' to '+c.to])}]:[]),
+      ...describeAnswers(rec).filter(s=>s.id!=='you').map(s=>({title:s.title,rows:s.rows.map(r=>[r.qtext||r.label,r.value])}))],
     footer:'A copy of the answers you sent to your advisor. It contains no scores or recommendations.',
     info:{title:'Your investor questionnaire',author:PRIVACY.firm}
   };
@@ -781,6 +882,8 @@ function insuranceRows(P, onChange, rowClass){
 /* ===== PHONE APP =====
    One question or one small group of questions per screen. Content, rules and helpers come from shared/. */
 const state = freshState();
+let baseline = null;      /* the earlier version's answers, kept so the review can mark what changed */
+let updateNotes = [];     /* messages from reading an earlier file */
 
 /* ----- screens ----- */
 const PROFILE_GROUPS = [
@@ -845,16 +948,18 @@ function stepForMissing(m){
 }
 
 /* ----- draft (saved on this device only, deleted after 7 days or on request) ----- */
-const DRAFT_KEY = 'investor-qq-draft-v1', DRAFT_MS = 7*24*3600*1000;
+const DRAFT_KEY = 'investor-qq-draft-v1', DRAFT_MS = EDIT_WINDOW_DAYS*24*3600*1000;
 function loadDraft(){
   try{
     const raw=localStorage.getItem(DRAFT_KEY); if(!raw) return null;
     const d=JSON.parse(raw);
-    if(!d||!d.state||Date.now()-d.savedAt>DRAFT_MS){ localStorage.removeItem(DRAFT_KEY); return null; }
+    /* answers already sent are kept for EDIT_WINDOW_DAYS from the send, whatever happens after. Unsent answers, EDIT_WINDOW_DAYS from the last visit. */
+    const sentMs=d&&d.state&&d.state.sentAt?new Date(d.state.sentAt).getTime():NaN, from=isNaN(sentMs)?(d&&d.savedAt):sentMs;
+    if(!d||!d.state||!(Date.now()-from<=DRAFT_MS)){ localStorage.removeItem(DRAFT_KEY); return null; }
     return d;
   }catch(e){ return null; }
 }
-function saveDraft(step){ try{ localStorage.setItem(DRAFT_KEY,JSON.stringify({savedAt:Date.now(),step,ver:3,state})); }catch(e){} }
+function saveDraft(step){ try{ localStorage.setItem(DRAFT_KEY,JSON.stringify({savedAt:Date.now(),step,ver:3,state,baseline,updateNotes})); }catch(e){} }
 function clearDraft(){ try{ localStorage.removeItem(DRAFT_KEY); }catch(e){} }
 function applyDraft(d){
   const f=freshState(), s=d.state||{};
@@ -867,6 +972,10 @@ function applyDraft(d){
   state.profile.noInsurance=!!P.noInsurance;
   state.profile.income=incomeRangeFor(state.profile.income); state.profile.debtTotal=debtRangeFor(state.profile.debtTotal);   /* drafts from before ranges hold dollars */
   state.taxAuto=String(s.taxAuto||'');
+  state.sentAt=String(s.sentAt||'');
+  state.revision=Number(s.revision)>=1?Number(s.revision):1;
+  state.previous=(s.previous&&typeof s.previous==='object'&&s.previous.hash!=null)?{revision:Number(s.previous.revision)||1,exportedAt:String(s.previous.exportedAt||''),hash:String(s.previous.hash||'')}:null;
+  baseline=(d.baseline&&typeof d.baseline==='object')?d.baseline:null; updateNotes=Array.isArray(d.updateNotes)?d.updateNotes:[];
   state.consent=(s.consent&&s.consent.acceptedAt)?{version:String(s.consent.version||''),acceptedAt:String(s.consent.acceptedAt),approved:!!s.consent.approved}:null;
   /* Drafts saved before version 2 held dollar amounts here, so they are not reused as percentages. */
   const keep=d.ver>=2;
@@ -874,10 +983,10 @@ function applyDraft(d){
   state.maxPos=keep?String(s.maxPos==null?'':s.maxPos):'';
   state.holdTotal=keep?String(s.holdTotal==null?'':s.holdTotal):'';
 }
-function resetState(){ Object.assign(state,freshState()); }
+function resetState(){ Object.assign(state,freshState()); baseline=null; updateNotes=[]; }
 
 /* ----- the screens ----- */
-let stepIdx=0, showErrors=false, draft=null, focusEl=null, returnToReview=false, sentAt=null;
+let stepIdx=0, showErrors=false, draft=null, focusEl=null, returnToReview=false;
 /* True when the page runs inside the native iPhone app (the Capacitor shell) instead of a browser. */
 const isNative = ()=> typeof window!=='undefined' && !!(window.Capacitor && typeof window.Capacitor.isNativePlatform==='function' && window.Capacitor.isNativePlatform());
 const isIos = ()=>{ if(typeof navigator==='undefined') return false; const ua=navigator.userAgent||''; return /iPad|iPhone|iPod/.test(ua)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1); };
@@ -950,12 +1059,19 @@ function screenFor(s){
         h('button',{type:'button',class:'btn wide',onclick:()=>{ applyDraft(draft); go(Math.min(Number(draft.step)||0,steps.length-1)); }},'Continue where I left off'),
         h('button',{type:'button',class:'btn ghost wide',onclick:()=>{ if(window.confirm('Delete the saved answers and start over?')){ clearDraft(); resetState(); draft=null; render(); } }},'Start over')));
     } else wrap.append(h('button',{type:'button',class:'btn wide',onclick:()=>go(1)},'Start'));
+    const earlierMsg=h('p',{class:'status',role:'status',id:'earlier-status'});
+    const pick=h('input',{type:'file',accept:'.json,application/json',hidden:true,id:'earlier-file',onchange:async e=>{ const f=e.target.files&&e.target.files[0]; e.target.value=''; if(f) await loadEarlierFile(f,earlierMsg); }});
+    wrap.append(pick,h('button',{type:'button',class:'btn ghost wide',id:'earlier-btn',onclick:()=>pick.click()},'Update answers I sent earlier'),earlierMsg);
     if(isIos()&&!isStandalone()&&!isNative()) wrap.append(h('p',{class:'fine',id:'install-tip'},'Tip: to open this like an app, tap the Share button, then Add to Home Screen. Do this before you start, because answers saved in Safari may not carry over to the home-screen app.'));
-    wrap.append(h('p',{class:'fine',id:'privacy-note'},'Nothing is sent anywhere while you fill this in. Your progress is saved on this device only, so you can leave and come back. At the end you send a file to your advisor, then you can delete your answers from this device.'));
+    wrap.append(h('p',{class:'fine',id:'privacy-note'},'Nothing is sent anywhere while you fill this in. Your progress is saved on this device only, so you can leave and come back. At the end you send a file to your advisor. '+editWindowText()+' You can also delete your answers from this device at any time.'));
   }
   else if(s.t==='consent'){
     wrap.append(title('Before you start'));
     if(!PRIVACY.approvedBy) wrap.append(h('div',{class:'draftbox',id:'consent-draft'},'Draft wording. Not yet approved by compliance.'));
+    if(state.previous){
+      const when=prettyDate(state.previous.exportedAt);
+      wrap.append(h('div',{class:'note',id:'update-note'},h('p',{},'You are updating the answers you sent'+(when?' on '+when:'')+'. Your earlier answers are filled in. Read this again, then review them, change what you need and send again.'),...updateNotes.map(n=>h('p',{style:'margin-top:6px'},n))));
+    }
     privacyBlocks().forEach(b=>wrap.append(h('div',{class:'cblock'},h('strong',{},b.title),h('p',{},b.text))));
     const cb=h('input',{type:'checkbox',id:'consent-box',onchange:e=>{ state.consent=e.target.checked?makeConsent():null; touch(); }}); cb.checked=!!state.consent;
     wrap.append(h('label',{class:'opt'},cb,h('span',{},CONSENT_LABEL)));
@@ -1029,9 +1145,15 @@ function screenFor(s){
     wrap.append(title('Review'));
     wrap.append(p.complete ? h('p',{class:'ok'},'Everything required is filled in.') : h('p',{class:'lede'},'Still needed before you can send your answers:'));
     if(!p.complete) wrap.append(h('ul',{class:'miss'},p.missing.map(m=>h('li',{},h('span',{},m.label),h('button',{type:'button',class:'btn ghost',onclick:()=>{ returnToReview=true; go(stepForMissing(m)); }},'Go')))));
+    const curMap=flatRows(rec); let changedCount=0;
+    if(baseline) Object.keys(Object.assign({},baseline,curMap)).forEach(k=>{ if((baseline[k]?baseline[k].value:'')!==(curMap[k]?curMap[k].value:'')) changedCount++; });
+    if(baseline&&state.previous){ const when=prettyDate(state.previous.exportedAt), need=Object.keys(Object.assign({},baseline,curMap)).filter(k=>(baseline[k]?baseline[k].value:'')!==(curMap[k]?curMap[k].value:'')&&needsApproval(k)).length; wrap.append(h('p',{class:'ok',id:'changed-count',style:'color:var(--text)'},'Updating the answers you sent'+(when?' on '+when:'')+'. '+(changedCount?changedCount+(changedCount===1?' answer has':' answers have')+' changed so far.':'Nothing has changed yet.')+(need?' '+need+(need===1?' needs':' need')+' your advisor\u2019s approval before '+(need===1?'it takes':'they take')+' effect.':''))); }
     wrap.append(h('p',{class:'fine'},'Tap any answer to change it. You will come back here afterwards.'));
-    const rowButton=(key,label,value,aria)=>h('li',{},h('button',{type:'button',class:'rowbtn','aria-label':aria||(label+', '+(value||'needed')+'. Change.'),onclick:()=>editRow(key)},
-      h('span',{class:'rl'},label),h('span',{class:'rvv'+(value?'':' needed')},value||'Needed'),h('span',{class:'chev','aria-hidden':'true'},'Edit')));
+    const rowButton=(key,label,value,aria)=>{
+      const mapKey=key==='hold'?'hold:'+label:key, changed=baseline&&(baseline[mapKey]?baseline[mapKey].value:'')!==value&&key!=='consent';
+      return h('li',{},h('button',{type:'button',class:'rowbtn','aria-label':aria||(label+', '+(value||'needed')+(changed?', changed':'')+'. Change.'),onclick:()=>editRow(key)},
+        h('span',{class:'rl'},label),h('span',{class:'rvv'+(value?'':' needed')},value||'Needed',changed?h('span',{class:'chgtag'},'Changed'):'',(changed&&needsApproval(key))?h('span',{class:'chgtag appr'},'Needs advisor approval'):''),h('span',{class:'chev','aria-hidden':'true'},'Edit')));
+    };
     describeAnswers(rec).forEach((sec,si)=>{
       const rows=sec.rows.filter(r=>r.value!==''||r.required);
       const list=rows.map(r=>rowButton(r.key,r.label,r.value,r.qtext?('Question '+r.label.replace('Question ','')+': '+r.qtext+' '+(r.value||'Needed')+'. Change.'):null));
@@ -1049,13 +1171,17 @@ function screenFor(s){
     const showDownload=!isNative()&&!(isIos()&&isStandalone()&&canShare);
     if(showDownload) wrap.append(h('button',{type:'button',class:canShare?'btn ghost wide':'btn wide',onclick:async()=>{ await sendFile(false,status); }},'Download my answers'));
     wrap.append(status,
+      h('p',{class:'fine',id:'edit-window-fine'},editWindowText()),
       h('p',{class:'fine'},'When you have sent the file, you can delete your answers from this device.'),
-      h('button',{type:'button',class:'btn ghost wide',onclick:()=>{ if(window.confirm('Delete your answers from this device? Make sure you have sent the file first.')){ clearDraft(); resetState(); draft=null; sentAt=null; go(0); } }},'Delete my answers from this device'));
+      h('button',{type:'button',class:'btn ghost wide',onclick:()=>{ if(window.confirm('Delete your answers from this device? Make sure you have sent the file first.')){ clearDraft(); resetState(); draft=null; go(0); } }},'Delete my answers from this device'));
   }
   else if(s.t==='sent'){
-    const rec=buildRecord(state);
+    const rec=record();
     wrap.append(h('div',{class:'done-badge','aria-hidden':'true'}),title('Your answers were sent'),
-      h('p',{class:'lede'},'Sent '+(sentAt||new Date()).toLocaleString('en-US',{dateStyle:'medium',timeStyle:'short'})+'. This is what you shared with your advisor.'));
+      h('p',{class:'lede'},'Sent '+(state.sentAt?new Date(state.sentAt):new Date()).toLocaleString('en-US',{dateStyle:'medium',timeStyle:'short'})+'. '+(state.previous?'This is version '+state.revision+'. It replaces the answers you sent'+(prettyDate(state.previous.exportedAt)?' on '+prettyDate(state.previous.exportedAt):'')+'. ':'')+'This is what you shared with your advisor.'));
+    wrap.append(h('div',{class:'note',id:'edit-window-note'},h('p',{},h('strong',{},editUntilText(state.sentAt||new Date().toISOString())))));
+    const waiting=approvalItems(rec.changes);
+    if(waiting.length) wrap.append(h('div',{class:'note',id:'approval-note'},h('p',{},h('strong',{},'Your advisor needs to approve '+(waiting.length===1?'this change':'these changes')+' before '+(waiting.length===1?'it takes':'they take')+' effect:')),...waiting.map(x=>h('p',{style:'margin-top:4px'},(x.short||x.label)+': '+x.from+' to '+x.to))));
     const status=h('p',{class:'status',role:'status',id:'pdf-status'});
     wrap.append(h('button',{type:'button',class:'btn wide',id:'pdf-copy',onclick:async()=>{ await savePdf(status); }},'Save a copy for my records (PDF)'),status);
     const dl=h('dl',{class:'sentlist'});
@@ -1065,14 +1191,28 @@ function screenFor(s){
       dl.append(h('h3',{},sec.title)); rows.forEach(r=>dl.append(h('div',{},h('dt',{},r.qtext||r.label),h('dd',{},r.value))));
     });
     wrap.append(dl,h('p',{class:'fine'},'The copy has no scores or recommendations. Your advisor will talk through the results with you.'),
-      h('button',{type:'button',class:'btn ghost wide',onclick:()=>{ if(window.confirm('Delete your answers from this device?')){ clearDraft(); resetState(); draft=null; sentAt=null; go(0); } }},'Delete my answers from this device'));
+      h('button',{type:'button',class:'btn ghost wide',onclick:()=>{ if(window.confirm('Delete your answers from this device?')){ clearDraft(); resetState(); draft=null; go(0); } }},'Delete my answers from this device'));
   }
   return wrap;
 }
 
+/* ----- reopening an earlier file ----- */
+const readText = file => file.text ? file.text() : new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(String(r.result)); r.onerror=rej; r.readAsText(file); });
+const record = () => buildRecord(state, baseline);
+const hasAnswers = () => state.name.trim()!=='' || state.tol.some(v=>v!=null);
+async function loadEarlierFile(file,msg){
+  let parsed;
+  try{ parsed=JSON.parse(await readText(file)); }catch(e){ msg.textContent='That file could not be read. Choose the file you sent to your advisor.'; return; }
+  const r=await readEarlierAnswers(parsed,sha256);
+  if(!r.ok){ msg.textContent=r.message; return; }
+  if((draft||hasAnswers())&&!window.confirm('This replaces the answers saved on this device with the answers from that file. Continue?')) return;
+  Object.assign(state,r.state); baseline=flatRows(r.record); updateNotes=r.notes; draft=null;
+  returnToReview=true; saveDraft(IDX.consent); go(IDX.consent);
+}
+
 /* ----- sending ----- */
 async function makeFile(){
-  const rec=buildRecord(state), hash=await sha256(JSON.stringify(rec));
+  const rec=record(), hash=await sha256(JSON.stringify(rec));
   const out={record:rec,note:'Client questionnaire. Load this file in the advisor risk profile tool.'};
   if(hash) out.sha256=hash;
   return {text:JSON.stringify(out,null,2), name:answersFileName(rec,'json')};
@@ -1108,12 +1248,12 @@ async function sendFile(viaShare,status){
       if(!ok){ browserDownload(f.name,f.text,'application/json'); ok=true; }
     }catch(e){ if(wasCancelled(e)) return false; status.textContent='Could not send the file. Try Download my answers instead.'; return false; }
   }
-  if(ok){ sentAt=new Date(); go(IDX.sent); }
+  if(ok){ state.sentAt=new Date().toISOString(); saveDraft(IDX.finish); go(IDX.sent); }
   return ok;
 }
 /* The copy the client keeps: a PDF of their own answers, with no scores. */
 async function savePdf(status){
-  const rec=buildRecord(state), bytes=buildPdf(pdfDocFor(rec)), name=answersFileName(rec,'pdf');
+  const rec=record(), bytes=buildPdf(pdfDocFor(rec)), name=answersFileName(rec,'pdf');
   try{
     if(isNative()){ await nativeShare(name,pdfToBase64(bytes),true,'My questionnaire answers'); status.textContent='Saved.'; return; }
     const file=new File([bytes],name,{type:'application/pdf'});
