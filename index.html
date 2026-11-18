@@ -1015,6 +1015,8 @@ window.addEventListener('popstate',e=>{
 });
 /* Open the screen behind a review row and come back to the review when done. */
 const editRow = key => { returnToReview=true; go(stepFor(key)); };
+/* Back to the first screen. The saved answers are looked up again, so the home page offers to continue them. */
+const goHome = () => { draft=loadDraft(); go(0); };
 const finishEdit = () => { returnToReview=false; go(IDX.review); };
 
 /* form fields for this page: "why we ask" notes, a Required message, and the draft saved on every change */
@@ -1191,7 +1193,8 @@ function screenFor(s){
       dl.append(h('h3',{},sec.title)); rows.forEach(r=>dl.append(h('div',{},h('dt',{},r.qtext||r.label),h('dd',{},r.value))));
     });
     wrap.append(dl,h('p',{class:'fine'},'The copy has no scores or recommendations. Your advisor will talk through the results with you.'),
-      h('button',{type:'button',class:'btn ghost wide',onclick:()=>{ if(window.confirm('Delete your answers from this device?')){ clearDraft(); resetState(); draft=null; go(0); } }},'Delete my answers from this device'));
+      h('button',{type:'button',class:'btn ghost wide',onclick:()=>{ if(window.confirm('Delete your answers from this device?')){ clearDraft(); resetState(); draft=null; go(0); } }},'Delete my answers from this device'),
+      h('button',{type:'button',class:'btn ghost wide',id:'home-btn',onclick:()=>goHome()},'Back to the home page'));
   }
   return wrap;
 }
