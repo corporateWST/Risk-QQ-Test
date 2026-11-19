@@ -1,7 +1,7 @@
 /* Offline support for the investor questionnaire.
    It stores only the page, icons and manifest. It never stores a client's answers.
    To release a new version, change CACHE below so phones drop the old copy. */
-const CACHE = 'investor-qq-v15';
+const CACHE = 'investor-qq-v16';
 const SHELL = ['./', './index.html', './manifest.webmanifest', './icon.svg', './icon-192.png', './icon-512.png', './icon-maskable-512.png', './apple-touch-icon.png'];
 
 self.addEventListener('install', e => {
@@ -20,6 +20,15 @@ self.addEventListener('fetch', e => {
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
+
+  /* The settings file: use the network when it answers, so a changed address arrives, otherwise use the saved copy. */
+  if (url.pathname.endsWith('/config.js')) {
+    e.respondWith(
+      fetch(req).then(res => { const copy = res.clone(); caches.open(CACHE).then(c => c.put(req, copy)); return res; })
+        .catch(() => caches.match(req).then(hit => hit || new Response('', {headers: {'Content-Type': 'text/javascript'}})))
+    );
+    return;
+  }
 
   /* Opening the app: use the network when it answers within 4 seconds so updates arrive, otherwise use the saved copy. */
   if (req.mode === 'navigate') {

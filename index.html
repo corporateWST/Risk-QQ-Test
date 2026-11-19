@@ -15,6 +15,7 @@
 <meta name="robots" content="noindex">
 <title>Investor questionnaire</title>
 <style>
+[hidden]{display:none!important}
 /* Crimson Pro, trimmed to Latin letters, digits and common punctuation.
    Copyright 2018 The Crimson Pro Project Authors (https://github.com/Fonthausen/CrimsonPro).
    Licensed under the SIL Open Font License 1.1, https://openfontlicense.org (see CrimsonPro-OFL.txt). */
@@ -192,6 +193,7 @@ dl.sentlist dd{flex:1;margin:0;font-weight:600;overflow-wrap:anywhere}
   </nav>
 </div>
 
+<script src="config.js"></script>
 <script>
 /* ===== SHARED CONTENT =====
    Every page (advisor tool, desktop questionnaire, phone app) is built from this file.
@@ -255,7 +257,9 @@ function privacyBlocks(){
   return [
     {title:'What we collect', text:'Your answers to this questionnaire: details about you and your household, your finances and investments, and how you feel about investment risk.'},
     {title:'Who sees it', text:'Your advisor at '+firm+' and the people at '+firm+' who help your advisor.'},
-    {title:'How it is stored and sent', text:'While you fill this in, your progress is saved on this device only. When you finish, you send your answers to your advisor yourself. Nothing is sent before then.'+(editWindowText()?' '+editWindowText():'')},
+    {title:'How it is stored and sent', text:(backendOn()
+      ? 'While you fill this in, your progress is saved on this device only. When you finish, you send your answers to your advisor from this app. They are saved in a private folder that '+firm+' controls. Nothing is sent before then.'
+      : 'While you fill this in, your progress is saved on this device only. When you finish, you send your answers to your advisor yourself. Nothing is sent before then.')+(editWindowText()?' '+editWindowText():'')},
     {title:'How long we keep it', text:PRIVACY.retention||'[How long '+firm+' keeps your answers will be set by its compliance team.]'},
     {title:'Your choices', text:'You can delete your answers from this device at any time. '+(PRIVACY.contact?'To ask about your information after you have sent it, contact '+PRIVACY.contact+'.':'[The contact for questions about your information will be added by '+firm+'.]')}
   ];
@@ -484,6 +488,38 @@ function taxNote(est){
   let t='Estimated from your income range using the '+est.year+' U.S. federal brackets, as '+est.filing+'.';
   if(est.borderline) t+=' Your range could fall in "'+est.range[0]+'" or "'+est.range[1]+'". We picked the one for the middle of your range.';
   return t+' Change it if you know yours. Your advisor will confirm.';
+}
+
+/* ----- sending the answers to the firm's Google Drive -----
+   The address and key come from config.js (phone app) or the block at the top of the file (desktop page).
+   With no address set, the apps send a file the old way. */
+const backendConfig = () => Object.assign({url:'',key:''}, (typeof window!=='undefined'&&window.QQ_BACKEND)||{});
+const backendOn = () => /^https:\/\//.test(String(backendConfig().url||''));
+const SEND_MESSAGES = {
+  network:'We could not reach the server. Check your internet connection and try again.',
+  key:'The questionnaire is not set up to receive answers yet. Please contact your advisor.',
+  too_large:'Your answers are too large to send. Please contact your advisor.',
+  default:'Your answers could not be sent. Please try again in a moment.'
+};
+function buildSubmission(rec, hash, pdfBytes, key){
+  return {key:key||'', sha256:hash||null, record:rec, pdf:pdfBytes?pdfToBase64(pdfBytes):null};
+}
+/* opts: {rec, hash, pdf (bytes), timeoutMs}. fetchFn is for tests. Returns {ok:true, folder, duplicate} or {ok:false, code, message}.
+   The request is plain text, so the browser does not need permission to send it to Google first. */
+async function submitAnswers(opts, fetchFn){
+  const cfg=backendConfig(), send=fetchFn||fetch;
+  const body=JSON.stringify(buildSubmission(opts.rec,opts.hash,opts.pdf,cfg.key));
+  const ctl=typeof AbortController!=='undefined'?new AbortController():null;
+  const timer=ctl?setTimeout(()=>ctl.abort(),opts.timeoutMs||30000):null;
+  try{
+    const res=await send(cfg.url,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body,redirect:'follow',signal:ctl?ctl.signal:undefined});
+    let data=null; try{ data=await res.json(); }catch(e){}
+    if(data&&data.ok) return {ok:true,folder:String(data.folder||''),duplicate:!!data.duplicate};
+    const code=(data&&data.error)||('http'+res.status);
+    return {ok:false,code,message:SEND_MESSAGES[code]||SEND_MESSAGES.default};
+  }catch(e){
+    return {ok:false,code:'network',message:SEND_MESSAGES.network};
+  }finally{ if(timer) clearTimeout(timer); }
 }
 
 /* ----- client answers: state, progress and the saved record ----- */
@@ -886,6 +922,7 @@ function insuranceRows(P, onChange, rowClass){
 const state = freshState();
 let baseline = null;      /* the earlier version's answers, kept so the review can mark what changed */
 let updateNotes = [];     /* messages from reading an earlier file */
+let pendingSend = null;   /* the file last built, reused while nothing changes, so a retry after a lost reply is recognised as the same submission */
 let sentStore = null;     /* the last file sent: {rec, hash, state}. Lets the client change what they sent without finding the file. */
 
 /* ----- screens ----- */
@@ -1096,7 +1133,7 @@ function screenFor(s){
       wrap.append(pick,h('button',{type:'button',class:'btn ghost wide',id:'earlier-btn',onclick:()=>pick.click()},'Update answers I sent earlier'),earlierMsg);
     }
     if(isIos()&&!isStandalone()&&!isNative()) wrap.append(h('p',{class:'fine',id:'install-tip'},'Tip: to open this like an app, tap the Share button, then Add to Home Screen. Do this before you start, because answers saved in Safari may not carry over to the home-screen app.'));
-    wrap.append(h('p',{class:'fine',id:'privacy-note'},'Nothing is sent anywhere while you fill this in. Your progress is saved on this device only, so you can leave and come back. At the end you send a file to your advisor.'+(editWindowText()?' '+editWindowText():'')+' You can also delete your answers from this device at any time.'));
+    wrap.append(h('p',{class:'fine',id:'privacy-note'},'Nothing is sent anywhere while you fill this in. Your progress is saved on this device only, so you can leave and come back. '+(backendOn()?'At the end you send your answers to your advisor.':'At the end you send a file to your advisor.')+(editWindowText()?' '+editWindowText():'')+' You can also delete your answers from this device at any time.'));
   }
   else if(s.t==='consent'){
     wrap.append(title('Before you start'));
@@ -1196,17 +1233,25 @@ function screenFor(s){
     });
   }
   else if(s.t==='finish'){
+    const online=backendOn();
     wrap.append(h('div',{class:'done-badge','aria-hidden':'true'}),title('Send your answers to your advisor'),
-      h('p',{class:'lede'},'Your answers are ready. If your firm gave you a secure upload link, use that instead of regular email, because the file contains personal and financial details.'));
+      h('p',{class:'lede'},online?'Your answers are ready. Tap the button to send them to your advisor.':'Your answers are ready. If your firm gave you a secure upload link, use that instead of regular email, because the file contains personal and financial details.'));
     const status=h('p',{class:'status',role:'status',id:'dl-status'});
     const canShare=isNative()||(typeof navigator!=='undefined'&&typeof navigator.canShare==='function'&&typeof File!=='undefined');
-    if(canShare) wrap.append(h('button',{type:'button',class:'btn wide',onclick:async()=>{ await sendFile(true,status); }},'Send to my advisor'));
-    const showDownload=!isNative()&&!(isIos()&&isStandalone()&&canShare);
-    if(showDownload) wrap.append(h('button',{type:'button',class:canShare?'btn ghost wide':'btn wide',onclick:async()=>{ await sendFile(false,status); }},'Download my answers'));
-    wrap.append(status,
+    if(online){
+      const fallback=h('button',{type:'button',class:'btn ghost wide',id:'send-as-file',hidden:true,onclick:async()=>{ await sendFile(canShare,status); }},'Send as a file instead');
+      const send=h('button',{type:'button',class:'btn wide',id:'send-btn',onclick:async()=>{ await sendOnline(send,status,fallback); }},'Send to my advisor');
+      wrap.append(send,status,fallback);
+    } else {
+      if(canShare) wrap.append(h('button',{type:'button',class:'btn wide',onclick:async()=>{ await sendFile(true,status); }},'Send to my advisor'));
+      const showDownload=!isNative()&&!(isIos()&&isStandalone()&&canShare);
+      if(showDownload) wrap.append(h('button',{type:'button',class:canShare?'btn ghost wide':'btn wide',onclick:async()=>{ await sendFile(false,status); }},'Download my answers'));
+      wrap.append(status);
+    }
+    wrap.append(
       editWindowText()?h('p',{class:'fine',id:'edit-window-fine'},editWindowText()):'',
-      h('p',{class:'fine'},'When you have sent the file, you can delete your answers from this device.'),
-      h('button',{type:'button',class:'btn ghost wide',onclick:()=>{ if(window.confirm('Delete your answers from this device? Make sure you have sent the file first.')){ clearDraft(); resetState(); draft=null; go(0); } }},'Delete my answers from this device'));
+      h('p',{class:'fine'},online?'When you have sent your answers, you can delete them from this device.':'When you have sent the file, you can delete your answers from this device.'),
+      h('button',{type:'button',class:'btn ghost wide',onclick:()=>{ if(window.confirm(online?'Delete your answers from this device? Make sure you have sent them first.':'Delete your answers from this device? Make sure you have sent the file first.')){ clearDraft(); resetState(); draft=null; go(0); } }},'Delete my answers from this device'));
   }
   else if(s.t==='sent'){
     const rec=sentStore?sentStore.rec:record();
@@ -1247,10 +1292,29 @@ async function loadEarlierFile(file,msg){
 /* ----- sending ----- */
 async function makeFile(){
   bumpFromSent();     /* a second send of changed answers is the next version, not another copy of the same one */
+  const sig=JSON.stringify([state,baseline]);
+  if(pendingSend&&pendingSend.sig===sig) return pendingSend.f;
   const rec=record(), hash=await sha256(JSON.stringify(rec));
   const out={record:rec,note:'Client questionnaire. Load this file in the advisor risk profile tool.'};
   if(hash) out.sha256=hash;
-  return {text:JSON.stringify(out,null,2), name:answersFileName(rec,'json'), rec, hash};
+  const f={text:JSON.stringify(out,null,2), name:answersFileName(rec,'json'), rec, hash};
+  pendingSend={sig,f};
+  return f;
+}
+/* The answers have been handed over, by the server or as a file. */
+function markSent(f){
+  state.sentAt=new Date().toISOString(); sentStore={rec:f.rec,hash:f.hash||'',state:JSON.parse(JSON.stringify(state))}; pendingSend=null;
+  saveDraft(IDX.finish); go(IDX.sent);
+}
+/* Send to the firm's Google Drive. A failed send keeps the answers and offers the file route. */
+async function sendOnline(btn,status,fallback){
+  if(!progress(state).complete){ status.textContent='Some required answers are missing. Go back to the review.'; return false; }
+  btn.disabled=true; status.textContent='Sending your answers\u2026';
+  const f=await makeFile();
+  const r=await submitAnswers({rec:f.rec,hash:f.hash,pdf:buildPdf(pdfDocFor(f.rec))});
+  btn.disabled=false;
+  if(!r.ok){ status.textContent=r.message; fallback.hidden=false; return false; }
+  markSent(f); return true;
 }
 function browserDownload(name,data,type){
   const url=URL.createObjectURL(new Blob([data],{type}));
@@ -1283,7 +1347,7 @@ async function sendFile(viaShare,status){
       if(!ok){ browserDownload(f.name,f.text,'application/json'); ok=true; }
     }catch(e){ if(wasCancelled(e)) return false; status.textContent='Could not send the file. Try Download my answers instead.'; return false; }
   }
-  if(ok){ state.sentAt=new Date().toISOString(); sentStore={rec:f.rec,hash:f.hash||'',state:JSON.parse(JSON.stringify(state))}; saveDraft(IDX.finish); go(IDX.sent); }
+  if(ok) markSent(f);
   return ok;
 }
 /* The copy the client keeps: a PDF of their own answers, with no scores. */
