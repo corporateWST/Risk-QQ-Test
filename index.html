@@ -170,6 +170,12 @@ ul.rv li{border-bottom:1px solid var(--line)}
 .rowbtn .chev{flex:none;color:var(--tide);font-weight:600;font-size:14px}
 .chgtag.appr{background:transparent;border:1.5px solid var(--buoy);color:var(--text)}
 .chgtag{display:inline-block;margin-left:8px;padding:1px 9px;border-radius:999px;background:var(--buoy);color:#12304A;font-size:12px;font-weight:700;vertical-align:1px}
+.suggest{border:1.5px solid var(--line);border-radius:14px;padding:14px 16px;margin:18px 0;background:rgba(31,122,140,.06)}
+.suggest h3{font-family:var(--serif);font-size:21px;font-weight:600;margin:0 0 8px}
+.suggest p{margin:0 0 8px}
+dl.suggest-rows{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;margin:6px 0 10px}
+dl.suggest-rows dt{color:var(--muted);font-size:14px;align-self:center}
+dl.suggest-rows dd{margin:0;font-weight:700;font-size:19px}
 dl.sentlist{margin:10px 0 18px}
 dl.sentlist h3{font-family:var(--serif);font-size:19px;margin:18px 0 4px}
 dl.sentlist div{display:flex;gap:12px;padding:8px 0;border-bottom:1px solid var(--line)}
@@ -277,6 +283,9 @@ const AFTER_WINDOW = () => EDIT_WINDOW_STRICT ? 'you will need to start again.' 
 const editWindowText = () => !SHOW_EDIT_WINDOW_NOTICE ? '' : 'After you send your answers you have '+EDIT_WINDOW_DAYS+' days to change them. After that '+(EDIT_WINDOW_STRICT?'your saved answers are deleted and you will need to start again.':'your saved answers are deleted. You can still change them later by opening the file you sent.');
 const editWindowTextDesktop = () => !SHOW_EDIT_WINDOW_NOTICE ? '' : 'After you download your answers you have '+EDIT_WINDOW_DAYS+' days to change them, by opening the file with the Update answers I sent earlier button. After that '+(EDIT_WINDOW_STRICT?'you will need to start again.':'you can still open the file, but your advisor may ask you to start again.');
 const editUntilText = iso => { const d=SHOW_EDIT_WINDOW_NOTICE?editDeadline(iso):null; return d?'You can change these answers until '+longDate(d)+'. After that '+AFTER_WINDOW():''; };
+/* ----- the advisor's suggestion, as the client sees it -----
+   Only the risk category and the model name are shown, with this reminder. Compliance must approve the wording. */
+const SUGGESTION_NOTE = 'This is your advisor\u2019s suggestion. Please talk to your advisor before you act on it.';
 const CONSENT_LABEL = 'I have read this and I agree to share my answers with my advisor.';
 const makeConsent = (now=new Date()) => ({version:PRIVACY.version, acceptedAt:now.toISOString(), approved:!!PRIVACY.approvedBy});
 
@@ -501,26 +510,79 @@ const SEND_MESSAGES = {
   too_large:'Your answers are too large to send. Please contact your advisor.',
   default:'Your answers could not be sent. Please try again in a moment.'
 };
-function buildSubmission(rec, hash, pdfBytes, key){
-  return {key:key||'', sha256:hash||null, record:rec, pdf:pdfBytes?pdfToBase64(pdfBytes):null};
+function buildSubmission(rec, hash, pdfBytes, key, claim){
+  const sb={key:key||'', sha256:hash||null, record:rec, pdf:pdfBytes?pdfToBase64(pdfBytes):null};
+  if(claim) sb.claim=claim;
+  return sb;
 }
-/* opts: {rec, hash, pdf (bytes), timeoutMs}. fetchFn is for tests. Returns {ok:true, folder, duplicate} or {ok:false, code, message}.
-   The request is plain text, so the browser does not need permission to send it to Google first. */
-async function submitAnswers(opts, fetchFn){
-  const cfg=backendConfig(), send=fetchFn||fetch;
-  const body=JSON.stringify(buildSubmission(opts.rec,opts.hash,opts.pdf,cfg.key));
+const STATUS_MESSAGES = {
+  network:'We could not check right now. Try again later.',
+  key:'We could not check right now. Try again later.',
+  not_found:'We could not find your answers on the server. Your advisor can help.',
+  default:'We could not check right now. Try again later.'
+};
+const APPROVE_MESSAGES = {
+  network:'We could not reach the server. Check your internet connection and try again.',
+  advisor_key:'The advisor key was not accepted. Check it and try again.',
+  advisor_key_not_set:'The advisor key has not been set up in the intake script yet. See the setup guide.',
+  not_found:'That submission was not found in Drive. Load the client\u2019s original file, exactly as it was sent.',
+  folder_missing:'The client\u2019s folder was not found in Drive. Check that it has not been moved to the bin.',
+  invalid:'The suggestion could not be sent. Check the category, the model and your name.',
+  default:'The suggestion could not be sent. Please try again in a moment.'
+};
+/* One request to the intake script. Returns {ok:true,data} or {ok:false,code,message}. The request is plain text, so the browser does
+   not need permission to send it to Google first. */
+async function callBackend(body, o, fetchFn){
+  const cfg=backendConfig(), send=fetchFn||fetch, msgs=(o&&o.messages)||{};
   const ctl=typeof AbortController!=='undefined'?new AbortController():null;
-  const timer=ctl?setTimeout(()=>ctl.abort(),opts.timeoutMs||30000):null;
+  const timer=ctl?setTimeout(()=>ctl.abort(),(o&&o.timeoutMs)||30000):null;
   try{
-    const res=await send(cfg.url,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body,redirect:'follow',signal:ctl?ctl.signal:undefined});
+    const res=await send(cfg.url,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(body),redirect:'follow',signal:ctl?ctl.signal:undefined});
     let data=null; try{ data=await res.json(); }catch(e){}
-    if(data&&data.ok) return {ok:true,folder:String(data.folder||''),duplicate:!!data.duplicate};
+    if(data&&data.ok) return {ok:true,data};
     const code=(data&&data.error)||('http'+res.status);
-    return {ok:false,code,message:SEND_MESSAGES[code]||SEND_MESSAGES.default};
+    return {ok:false,code,message:msgs[code]||msgs.default||SEND_MESSAGES[code]||SEND_MESSAGES.default};
   }catch(e){
-    return {ok:false,code:'network',message:SEND_MESSAGES.network};
+    return {ok:false,code:'network',message:msgs.network||SEND_MESSAGES.network};
   }finally{ if(timer) clearTimeout(timer); }
 }
+/* opts: {rec, hash, pdf (bytes), claim, timeoutMs}. fetchFn is for tests.
+   Returns {ok:true, folder, duplicate, id} or {ok:false, code, message}. */
+async function submitAnswers(opts, fetchFn){
+  const cfg=backendConfig();
+  const r=await callBackend(buildSubmission(opts.rec,opts.hash,opts.pdf,cfg.key,opts.claim),{timeoutMs:opts.timeoutMs||30000},fetchFn);
+  return r.ok?{ok:true,folder:String(r.data.folder||''),duplicate:!!r.data.duplicate,id:String(r.data.id||'')}:r;
+}
+/* The client's app asks whether the advisor's suggestion is ready. opts: {id, claim}. */
+async function fetchSuggestion(opts, fetchFn){
+  const cfg=backendConfig();
+  const r=await callBackend({action:'status',key:cfg.key,id:opts.id,claim:opts.claim},{timeoutMs:opts.timeoutMs||20000,messages:STATUS_MESSAGES},fetchFn);
+  if(!r.ok) return r;
+  const d=r.data, s=d.suggestion;
+  return d.status==='approved'&&s
+    ? {ok:true,status:'approved',suggestion:{category:String(s.category),model:String(s.model),approvedBy:String(s.approvedBy||''),approvedAt:String(s.approvedAt||'')}}
+    : {ok:true,status:'pending'};
+}
+/* The advisor tool approves a suggestion. opts: {advisorKey, id, suggestion:{category,model,approvedBy}, pdf (bytes)}. */
+async function approveSuggestion(opts, fetchFn){
+  const r=await callBackend({action:'approve',advisorKey:opts.advisorKey,id:opts.id,suggestion:opts.suggestion,pdf:opts.pdf?pdfToBase64(opts.pdf):null},{timeoutMs:opts.timeoutMs||30000,messages:APPROVE_MESSAGES},fetchFn);
+  return r.ok?{ok:true,approvedAt:String(r.data.approvedAt||'')}:r;
+}
+/* A random secret, made on the client's device when they send. Only a fingerprint of it ever reaches the server. */
+function newClaim(){
+  const a=new Uint8Array(16);
+  if(typeof crypto!=='undefined'&&crypto.getRandomValues) crypto.getRandomValues(a); else for(let i=0;i<16;i++) a[i]=Math.floor(Math.random()*256);
+  return [...a].map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+/* What the app keeps so it can ask for the suggestion later: the submission's fingerprint, the secret, and the last suggestion seen.
+   It is small, it holds no answers, and it stays until the client deletes their answers. */
+const CLAIM_KEY = 'investor-qq-claim-v1';
+const claimStorage = () => { try{ return (typeof window!=='undefined'&&window.localStorage)||null; }catch(e){ return null; } };
+function claimLoad(){ try{ const v=JSON.parse(claimStorage().getItem(CLAIM_KEY)); return v&&v.id&&v.claim?v:null; }catch(e){ return null; } }
+function claimSave(v){ try{ claimStorage().setItem(CLAIM_KEY,JSON.stringify(v)); }catch(e){} }
+function claimClear(){ try{ claimStorage().removeItem(CLAIM_KEY); }catch(e){} }
+/* After a send: remember the new submission. A suggestion for an earlier version is kept, marked as being for that one. */
+function claimRemember(id, claim){ const prior=claimLoad(); claimSave({id,claim,sentAt:new Date().toISOString(),suggestion:(prior&&prior.suggestion)||null}); }
 
 /* ----- client answers: state, progress and the saved record ----- */
 const freshState = () => ({
@@ -917,6 +979,34 @@ function insuranceRows(P, onChange, rowClass){
     onChange});
 }
 
+/* ----- the advisor's suggestion for this client -----
+   host is a box on the page. It shows what the app already knows, then asks the server and shows the answer. */
+function paintSuggestion(host, store, o){
+  o=o||{}; host.replaceChildren();
+  if(!store){ host.hidden=true; return; }
+  host.hidden=false;
+  const s=store.suggestion, current=!!(s&&s.forId===store.id);
+  const rows=sg=>h('dl',{class:'suggest-rows'},h('dt',{},'Risk category'),h('dd',{class:'suggest-category'},sg.category),h('dt',{},'Suggested model'),h('dd',{class:'suggest-model'},sg.model));
+  const by=sg=>'Approved'+(sg.approvedBy?' by '+sg.approvedBy:'')+(prettyDate(sg.approvedAt)?' on '+prettyDate(sg.approvedAt):'')+'.';
+  host.append(h('h3',{},'Your advisor\u2019s suggestion'));
+  if(current) host.append(rows(s),h('p',{class:'fine suggest-note'},by(s)+' '+SUGGESTION_NOTE));
+  else {
+    host.append(h('p',{class:'suggest-pending'},o.checking?'Checking for your advisor\u2019s suggestion\u2026':'Your advisor is reviewing your answers. Open this app again later to see their suggestion.'));
+    if(s) host.append(h('p',{class:'fine'},'Your advisor\u2019s earlier suggestion, from your earlier answers:'),rows(s),h('p',{class:'fine suggest-note'},by(s)+' '+SUGGESTION_NOTE));
+  }
+  if(o.error) host.append(h('p',{class:'status suggest-error',role:'status'},o.error),h('button',{type:'button',class:'btn ghost suggest-retry',onclick:()=>refreshSuggestion(host)},'Check again'));
+}
+async function refreshSuggestion(host){
+  const store=claimLoad();
+  paintSuggestion(host,store,{checking:!!store&&backendOn()});
+  if(!store||!backendOn()) return;
+  const r=await fetchSuggestion({id:store.id,claim:store.claim});
+  const now=claimLoad();
+  if(!now||now.id!==store.id){ paintSuggestion(host,now,{}); return; }       // a newer send happened while waiting
+  if(r.ok&&r.status==='approved'){ now.suggestion=Object.assign({forId:store.id},r.suggestion); claimSave(now); }
+  paintSuggestion(host,claimLoad(),{error:r.ok?'':r.message});
+}
+
 /* ===== PHONE APP =====
    One question or one small group of questions per screen. Content, rules and helpers come from shared/. */
 const state = freshState();
@@ -1110,6 +1200,7 @@ function screenFor(s){
     const route=h('ol',{class:'route'},SECTIONS.map((x,i)=>h('li',{class:i===0?'here':''},h('b',{},x.name),h('span',{},x.desc))));
     wrap.append(e,
       h('p',{class:'lede'},'Your advisor uses your answers to understand your goals, your finances and how you feel about risk. It takes about 10 minutes. There are no right or wrong answers, and best estimates are fine.'));
+    const sug=h('div',{class:'suggest',id:'suggest-card',hidden:true}); wrap.append(sug); refreshSuggestion(sug);     /* the advisor's suggestion, once approved */
     if(!draft) wrap.append(route);     /* with saved answers, the choices come first and the route follows them */
     const sent=draft&&draft.sent?draft.sent:null, pending=!!(sent&&Number(draft.state.revision)>Number(sent.rec.revision));
     if(sent){
@@ -1251,13 +1342,14 @@ function screenFor(s){
     wrap.append(
       editWindowText()?h('p',{class:'fine',id:'edit-window-fine'},editWindowText()):'',
       h('p',{class:'fine'},online?'When you have sent your answers, you can delete them from this device.':'When you have sent the file, you can delete your answers from this device.'),
-      h('button',{type:'button',class:'btn ghost wide',onclick:()=>{ if(window.confirm(online?'Delete your answers from this device? Make sure you have sent them first.':'Delete your answers from this device? Make sure you have sent the file first.')){ clearDraft(); resetState(); draft=null; go(0); } }},'Delete my answers from this device'));
+      h('button',{type:'button',class:'btn ghost wide',onclick:()=>{ if(window.confirm(online?'Delete your answers from this device? Make sure you have sent them first. You will not see your advisor\u2019s suggestion in this app afterwards.':'Delete your answers from this device? Make sure you have sent the file first.')){ clearDraft(); claimClear(); resetState(); draft=null; go(0); } }},'Delete my answers from this device'));
   }
   else if(s.t==='sent'){
     const rec=sentStore?sentStore.rec:record();
     wrap.append(h('div',{class:'done-badge','aria-hidden':'true'}),title('Your answers were sent'),
       h('p',{class:'lede'},'Sent '+(state.sentAt?new Date(state.sentAt):new Date()).toLocaleString('en-US',{dateStyle:'medium',timeStyle:'short'})+'. '+(rec.supersedes?'This is version '+rec.revision+'. It replaces the answers you sent'+(prettyDate(rec.supersedes.exportedAt)?' on '+prettyDate(rec.supersedes.exportedAt):'')+'. ':'')+'This is what you shared with your advisor.'));
     if(editUntilText(state.sentAt||new Date().toISOString())) wrap.append(h('div',{class:'note',id:'edit-window-note'},h('p',{},h('strong',{},editUntilText(state.sentAt||new Date().toISOString())))));
+    if(backendOn()) wrap.append(h('div',{class:'note',id:'next-note'},h('p',{},'Your advisor will review your answers. Open this app again to see their suggestion.')));
     const waiting=approvalItems(rec.changes);
     if(waiting.length) wrap.append(h('div',{class:'note',id:'approval-note'},h('p',{},h('strong',{},'Your advisor needs to approve '+(waiting.length===1?'this change':'these changes')+' before '+(waiting.length===1?'it takes':'they take')+' effect:')),...waiting.map(x=>h('p',{style:'margin-top:4px'},(x.short||x.label)+': '+x.from+' to '+x.to))));
     const status=h('p',{class:'status',role:'status',id:'pdf-status'});
@@ -1269,7 +1361,7 @@ function screenFor(s){
       dl.append(h('h3',{},sec.title)); rows.forEach(r=>dl.append(h('div',{},h('dt',{},r.qtext||r.label),h('dd',{},r.value))));
     });
     wrap.append(dl,h('p',{class:'fine'},'The copy has no scores or recommendations. Your advisor will talk through the results with you.'),
-      h('button',{type:'button',class:'btn ghost wide',onclick:()=>{ if(window.confirm('Delete your answers from this device?')){ clearDraft(); resetState(); draft=null; go(0); } }},'Delete my answers from this device'),
+      h('button',{type:'button',class:'btn ghost wide',onclick:()=>{ if(window.confirm(backendOn()?'Delete your answers from this device? You will not see your advisor\u2019s suggestion in this app afterwards.':'Delete your answers from this device?')){ clearDraft(); claimClear(); resetState(); draft=null; go(0); } }},'Delete my answers from this device'),
       h('button',{type:'button',class:'btn ghost wide',id:'home-btn',onclick:()=>goHome()},'Back to the home page'));
   }
   return wrap;
@@ -1297,7 +1389,7 @@ async function makeFile(){
   const rec=record(), hash=await sha256(JSON.stringify(rec));
   const out={record:rec,note:'Client questionnaire. Load this file in the advisor risk profile tool.'};
   if(hash) out.sha256=hash;
-  const f={text:JSON.stringify(out,null,2), name:answersFileName(rec,'json'), rec, hash};
+  const f={text:JSON.stringify(out,null,2), name:answersFileName(rec,'json'), rec, hash, claim:backendOn()?newClaim():''};
   pendingSend={sig,f};
   return f;
 }
@@ -1311,9 +1403,10 @@ async function sendOnline(btn,status,fallback){
   if(!progress(state).complete){ status.textContent='Some required answers are missing. Go back to the review.'; return false; }
   btn.disabled=true; status.textContent='Sending your answers\u2026';
   const f=await makeFile();
-  const r=await submitAnswers({rec:f.rec,hash:f.hash,pdf:buildPdf(pdfDocFor(f.rec))});
+  const r=await submitAnswers({rec:f.rec,hash:f.hash,pdf:buildPdf(pdfDocFor(f.rec)),claim:f.claim});
   btn.disabled=false;
   if(!r.ok){ status.textContent=r.message; fallback.hidden=false; return false; }
+  claimRemember(r.id||f.hash,f.claim);     /* so this phone can ask for the advisor's suggestion later */
   markSent(f); return true;
 }
 function browserDownload(name,data,type){
